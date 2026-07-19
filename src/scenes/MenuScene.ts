@@ -7,8 +7,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    const W = this.scale.width;   // 820
-    const H = this.scale.height;  // 540
+    const W = this.scale.width;
 
     this.add.text(W / 2, 140, 'Salt & Butchery', {
       fontSize: '52px',
