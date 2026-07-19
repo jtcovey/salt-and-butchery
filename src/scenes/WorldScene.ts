@@ -12,7 +12,7 @@ const MOVE_SPEED = 4;
 const PANEL_X    = 644;
 const AP_W       = 168;
 const TAB_W      = Math.floor((AP_W - 3) / 2);
-const AP_H       = 140;
+const AP_H       = 165;
 const AP_D       = 20;
 
 const CLASS_COLOR: Record<CharacterClass, number> = {
@@ -35,12 +35,13 @@ export class WorldScene extends Phaser.Scene {
 
   // ── Selection / ActionsPanel state ────────────────────────────────────────
   private selectedChar:   PC | null                          = null;
-  private apMode:         'move' | 'actions' | 'attacking'  = 'move';
+  private apMode:         'move' | 'actions' | 'attacking' | 'healing' = 'move';
   private apVisible       = false;
   private apX             = 0;
   private apY             = 0;
   private reachableTiles  = new Map<string, number>();
   private attackableTiles = new Set<string>();
+  private healableTiles   = new Set<string>();
 
   // ── Graphics ───────────────────────────────────────────────────────────────
   private mapGfx!: Phaser.GameObjects.Graphics;
@@ -69,6 +70,8 @@ export class WorldScene extends Phaser.Scene {
   private apAtkLbl!:     Phaser.GameObjects.Text;
   private apDefBtn!:     Phaser.GameObjects.Rectangle;
   private apDefLbl!:     Phaser.GameObjects.Text;
+  private apHealBtn!:    Phaser.GameObjects.Rectangle;
+  private apHealLbl!:    Phaser.GameObjects.Text;
   private apHint!:       Phaser.GameObjects.Text;
   private apCancelBtn!:  Phaser.GameObjects.Rectangle;
   private apCancelLbl!:  Phaser.GameObjects.Text;
@@ -256,8 +259,10 @@ export class WorldScene extends Phaser.Scene {
 
     this.apAtkBtn = this.add.rectangle(0, 0, AP_W - 2, 22, 0x551111).setOrigin(0, 0).setDepth(AP_D + 1);
     this.apAtkLbl = txt(this, 'ATTACK', '10px', '#ff8888').setDepth(AP_D + 2).setOrigin(0.5);
-    this.apDefBtn = this.add.rectangle(0, 0, AP_W - 2, 22, 0x115511).setOrigin(0, 0).setDepth(AP_D + 1);
-    this.apDefLbl = txt(this, 'DEFEND', '10px', '#88ff88').setDepth(AP_D + 2).setOrigin(0.5);
+    this.apDefBtn  = this.add.rectangle(0, 0, AP_W - 2, 22, 0x115511).setOrigin(0, 0).setDepth(AP_D + 1);
+    this.apDefLbl  = txt(this, 'DEFEND', '10px', '#88ff88').setDepth(AP_D + 2).setOrigin(0.5);
+    this.apHealBtn = this.add.rectangle(0, 0, AP_W - 2, 22, 0x115533).setOrigin(0, 0).setDepth(AP_D + 1);
+    this.apHealLbl = txt(this, 'HEAL',   '10px', '#88ffcc').setDepth(AP_D + 2).setOrigin(0.5);
 
     this.apHint      = txt(this, 'Click an enemy to attack', '9px', '#ffaa44').setDepth(AP_D + 1);
     this.apCancelBtn = this.add.rectangle(0, 0, AP_W - 2, 22, 0x333344).setOrigin(0, 0).setDepth(AP_D + 1);
@@ -274,6 +279,7 @@ export class WorldScene extends Phaser.Scene {
       this.apBg, this.apHeader, this.apStats,
       this.apMoveTab, this.apMoveTabLbl, this.apActsTab, this.apActsTabLbl,
       this.apAtkBtn, this.apAtkLbl, this.apDefBtn, this.apDefLbl,
+      this.apHealBtn, this.apHealLbl,
       this.apHint, this.apCancelBtn, this.apCancelLbl,
       this.apEndBtn, this.apEndLbl,
     ].forEach(el => el?.setVisible(v));
@@ -326,23 +332,28 @@ export class WorldScene extends Phaser.Scene {
 
     // Content: actions vs targeting
     const inActions   = this.apMode === 'actions';
-    const inTargeting = this.apMode === 'attacking';
+    const inTargeting = this.apMode === 'attacking' || this.apMode === 'healing';
 
-    const canAtk = acts.find(a => a.id === 'attack')?.canUse(c, gs) ?? false;
-    const canDef = acts.find(a => a.id === 'defend')?.canUse(c, gs) ?? false;
+    const canAtk  = acts.find(a => a.id === 'attack')?.canUse(c, gs) ?? false;
+    const canDef  = acts.find(a => a.id === 'defend')?.canUse(c, gs) ?? false;
+    const hasHeal = acts.some(a => a.id === 'heal');
+    const canHeal = acts.find(a => a.id === 'heal')?.canUse(c, gs) ?? false;
 
     this.apAtkBtn.setVisible(inActions).setPosition(x + 1, y + 55).setFillStyle(canAtk ? 0x551111 : 0x221111);
     this.apAtkLbl.setVisible(inActions).setPosition(x + AP_W / 2, y + 66).setColor(canAtk ? '#ff8888' : '#553333');
     this.apDefBtn.setVisible(inActions).setPosition(x + 1, y + 79).setFillStyle(canDef ? 0x115511 : 0x112211);
     this.apDefLbl.setVisible(inActions).setPosition(x + AP_W / 2, y + 90).setColor(canDef ? '#88ff88' : '#335533');
+    this.apHealBtn.setVisible(inActions && hasHeal).setPosition(x + 1, y + 103).setFillStyle(canHeal ? 0x115533 : 0x112233);
+    this.apHealLbl.setVisible(inActions && hasHeal).setPosition(x + AP_W / 2, y + 114).setColor(canHeal ? '#88ffcc' : '#335544');
 
-    this.apHint.setVisible(inTargeting).setPosition(x + 6, y + 57);
+    const hintText = this.apMode === 'healing' ? 'Click an adjacent ally to heal' : 'Click an enemy to attack';
+    this.apHint.setVisible(inTargeting).setPosition(x + 6, y + 57).setText(hintText);
     this.apCancelBtn.setVisible(inTargeting).setPosition(x + 1, y + 87);
     this.apCancelLbl.setVisible(inTargeting).setPosition(x + AP_W / 2, y + 98);
 
     // End Turn always shown
-    this.apEndBtn.setPosition(x + 1, y + 116);
-    this.apEndLbl.setPosition(x + AP_W / 2, y + 127);
+    this.apEndBtn.setPosition(x + 1, y + 130);
+    this.apEndLbl.setPosition(x + AP_W / 2, y + 141);
   }
 
   private hideActionsPanel() {
@@ -351,6 +362,7 @@ export class WorldScene extends Phaser.Scene {
     this.apMode       = 'move';
     this.reachableTiles.clear();
     this.attackableTiles.clear();
+    this.healableTiles.clear();
     this.setActionsPanelVisible(false);
     this.hlGfx.clear();
   }
@@ -371,6 +383,15 @@ export class WorldScene extends Phaser.Scene {
           break;
         }
         case 'KeyD': if (!c.hasActed && c.stamina > 0) this.doDefend(c); break;
+        case 'KeyH': {
+          if (c.charClass !== 'cleric') break;
+          const gs = this.getGameState();
+          const canHeal = !c.hasActed && c.stamina > 0 &&
+            gs.party.some(t => t !== c && t.hp > 0 && !t.status.includes('beaten') &&
+              t.hp < t.maxHp && Math.abs(t.gridX - c.gridX) + Math.abs(t.gridY - c.gridY) === 1);
+          if (canHeal) { this.apMode = 'healing'; this.updateActionsPanel(); this.refreshHighlights(); }
+          break;
+        }
         case 'Space':
         case 'Enter': this.endCharTurn(c); break;
       }
@@ -403,6 +424,9 @@ export class WorldScene extends Phaser.Scene {
       } else if (this.apMode === 'attacking' && this.attackableTiles.has(`${tx},${ty}`)) {
         const enemy = this.enemyAtGrid(tx, ty);
         if (enemy) this.executeAttack(this.selectedChar, enemy);
+      } else if (this.apMode === 'healing' && this.healableTiles.has(`${tx},${ty}`)) {
+        const ally = this.partyMemberAtGrid(tx, ty);
+        if (ally) this.executeHeal(this.selectedChar, ally);
       }
     });
   }
@@ -419,7 +443,7 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
-    // Actions content  y 55..113
+    // Actions content  y 55..125
     if (this.apMode === 'actions') {
       if (ly >= 55 && ly <= 77) {
         const wt = c.inventory.equippedWeaponType();
@@ -436,18 +460,30 @@ export class WorldScene extends Phaser.Scene {
         if (!c.hasActed && c.stamina > 0) this.doDefend(c);
         return;
       }
+      if (ly >= 103 && ly <= 125) {
+        const gs = this.getGameState();
+        const canHeal = !c.hasActed && c.stamina > 0 &&
+          gs.party.some(t => t !== c && t.hp > 0 && !t.status.includes('beaten') &&
+            t.hp < t.maxHp && Math.abs(t.gridX - c.gridX) + Math.abs(t.gridY - c.gridY) === 1);
+        if (canHeal) {
+          this.apMode = 'healing';
+          this.updateActionsPanel();
+          this.refreshHighlights();
+        }
+        return;
+      }
     }
 
     // Targeting cancel  y 87..109
-    if (this.apMode === 'attacking' && ly >= 87 && ly <= 109) {
+    if ((this.apMode === 'attacking' || this.apMode === 'healing') && ly >= 87 && ly <= 109) {
       this.apMode = 'actions';
       this.updateActionsPanel();
       this.refreshHighlights();
       return;
     }
 
-    // End Turn  y 116..138
-    if (ly >= 116 && ly <= 138) {
+    // End Turn  y 130..152
+    if (ly >= 130 && ly <= 152) {
       this.endCharTurn(c);
     }
   }
@@ -463,6 +499,7 @@ export class WorldScene extends Phaser.Scene {
     this.hlGfx.clear();
     this.reachableTiles.clear();
     this.attackableTiles.clear();
+    this.healableTiles.clear();
 
     const c = this.selectedChar;
     if (!c || !this.apVisible || c.dead || c.turnDone || c.status.includes('beaten')) return;
@@ -484,6 +521,15 @@ export class WorldScene extends Phaser.Scene {
         this.attackableTiles.add(key);
         this.hlGfx.fillStyle(0xaa1111, 0.55);
         this.hlGfx.fillRect(e.gridX * TILE, e.gridY * TILE + TOP_BAR, TILE - 1, TILE - 1);
+      });
+    } else if (this.apMode === 'healing') {
+      this.party.forEach(t => {
+        if (t === c || t.hp <= 0 || t.status.includes('beaten') || t.hp >= t.maxHp) return;
+        if (Math.abs(t.gridX - c.gridX) + Math.abs(t.gridY - c.gridY) !== 1) return;
+        const key = `${t.gridX},${t.gridY}`;
+        this.healableTiles.add(key);
+        this.hlGfx.fillStyle(0x22cc88, 0.55);
+        this.hlGfx.fillRect(t.gridX * TILE, t.gridY * TILE + TOP_BAR, TILE - 1, TILE - 1);
       });
     }
 
@@ -763,6 +809,22 @@ export class WorldScene extends Phaser.Scene {
 
   private enemyAtGrid(gx: number, gy: number): NPC | null {
     return this.enemies.find(e => e.gridX === gx && e.gridY === gy) ?? null;
+  }
+
+  private partyMemberAtGrid(gx: number, gy: number): PC | null {
+    return this.party.find(c => c.gridX === gx && c.gridY === gy && !c.dead) ?? null;
+  }
+
+  private executeHeal(caster: PC, target: PC) {
+    caster.stamina--;
+    caster.hasActed = true;
+    const amount = 1 + caster.skills.wisdom;
+    target.hp = Math.min(target.maxHp, target.hp + amount);
+    this.log4(`${caster.name} heals ${target.name} for ${amount} HP. (${target.hp}/${target.maxHp})`);
+    this.apMode = 'actions';
+    this.updateActionsPanel();
+    this.refreshHighlights();
+    this.refreshOverlay();
   }
 
   private killEnemy(e: NPC) {

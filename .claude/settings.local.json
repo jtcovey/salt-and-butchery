@@ -1,7 +1,22 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"cd 'c:\\projects\\salt-and-butchery'; $out = npx tsc --noEmit 2>&1; if ($out) { $out | Select-Object -First 20 } else { Write-Output 'tsc: OK' }\"",
+            "shell": "powershell"
+          }
+        ]
+      }
     ]
   }
 }

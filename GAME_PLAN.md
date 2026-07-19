@@ -20,6 +20,48 @@ The game is to be played: structure, substance, meaningful choices.
 - Main menu (MenuScene → New Game, Options, Quit)
 - Reusable UIButton with hover/click/default color states
 
+## Class Design
+
+### Warrior
+- Basic melee attacker, highest HP and AC
+- **Abilities to implement:**
+  - [ ] ATTACK — melee, adjacent only (already wired)
+  - [ ] DEFEND — +1 AC until next turn (already wired)
+  - [ ] Future: power strike (costs 2 stamina, bonus damage)
+
+### Thief
+- Fast, glass cannon, ranged option via BOW
+- **Abilities to implement:**
+  - [ ] ATTACK — melee or ranged depending on equipped weapon (already wired)
+  - [ ] Future: backstab (bonus damage from behind / flanking)
+  - [ ] Future: pickpocket / steal item from enemy
+
+### Sorcerer
+- Fragile, but carries the most dangerous ability in the game
+- **Abilities to implement:**
+  - [ ] CURSE — ranged, any visible enemy, no range limit
+    - Instantly kills target (turns them to salt) unless they have protection
+    - Protection: anti-magic talisman item (blocks one curse, consumed) OR anti-curse stacks
+    - Anti-curse stacks come from consuming Shadow Hearts (item)
+    - Each curse hit consumes one anti-curse stack; talisman takes priority over stacks
+    - If target has neither — instant death, no save
+    - Costs stamina; sorcerer has low HP so positioning matters
+  - [ ] Future: additional spells (TBD with fiction layer)
+
+### Cleric
+- Support role, the party's only healing
+- **Abilities to implement:**
+  - [ ] HEAL — touch range (adjacent squares only, same as melee)
+    - Targets a friendly PC on an adjacent tile
+    - Restores HP (amount TBD — likely 1 HP at base, scales with wisdom)
+    - Costs stamina
+    - Cannot self-heal (or can at reduced effectiveness — decide later)
+  - [ ] DEFEND (already wired)
+  - [ ] Future: bless (temporary AC buff to adjacent ally)
+  - [ ] Future: exorcise (effective vs undead enemy type)
+
+---
+
 ## Feature Roadmap
 
 ### Near Term
