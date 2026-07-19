@@ -6,9 +6,15 @@ export interface UIButtonConfig {
   height?: number;
   fontSize?: number;
   textColor?: string;
+  textHoverColor?: string;
   bgColor?: number;
   hoverColor?: number;
   pressedColor?: number;
+  borderColor?: number;
+  borderHoverColor?: number;
+  disabledTextColor?: string;
+  disabledBgColor?: number;
+  disabledBorderColor?: number;
   onClick?: () => void;
 }
 
@@ -16,53 +22,148 @@ const DEFAULTS = {
   width: 220,
   height: 46,
   fontSize: 18,
-  textColor: '#ffffff',
-  bgColor: 0x1a1a1a,
-  hoverColor: 0x3a3a3a,
-  pressedColor: 0x666666,
+  textColor: '#ccddff',
+  textHoverColor: '#ffffff',
+  bgColor: 0x111128,
+  hoverColor: 0x1a1a44,
+  pressedColor: 0x222266,
+  borderColor: 0x334466,
+  borderHoverColor: 0x5588cc,
+  disabledTextColor: '#333344',
+  disabledBgColor: 0x0a0a14,
+  disabledBorderColor: 0x1a1a2a,
 };
 
 export class UIButton extends Phaser.GameObjects.Container {
-  private bg: Phaser.GameObjects.Rectangle;
+  private bg: Phaser.GameObjects.Graphics;
   private label: Phaser.GameObjects.Text;
-  private bgColor: number;
-  private hoverColor: number;
-  private pressedColor: number;
-  private onClick: () => void;
+  private config: Required<Omit<UIButtonConfig, 'onClick'>> & { onClick: () => void };
+  private enabled = true;
+  private clickLocked = false;
+  private btnWidth: number;
+  private btnHeight: number;
 
   constructor(scene: Phaser.Scene, x: number, y: number, config: UIButtonConfig) {
     super(scene, x, y);
 
-    const w = config.width ?? DEFAULTS.width;
-    const h = config.height ?? DEFAULTS.height;
-    const fontSize = config.fontSize ?? DEFAULTS.fontSize;
-    const textColor = config.textColor ?? DEFAULTS.textColor;
+    this.btnWidth = config.width ?? DEFAULTS.width;
+    this.btnHeight = config.height ?? DEFAULTS.height;
 
-    this.bgColor = config.bgColor ?? DEFAULTS.bgColor;
-    this.hoverColor = config.hoverColor ?? DEFAULTS.hoverColor;
-    this.pressedColor = config.pressedColor ?? DEFAULTS.pressedColor;
-    this.onClick = config.onClick ?? (() => {});
+    this.config = {
+      text: config.text,
+      width: this.btnWidth,
+      height: this.btnHeight,
+      fontSize: config.fontSize ?? DEFAULTS.fontSize,
+      textColor: config.textColor ?? DEFAULTS.textColor,
+      textHoverColor: config.textHoverColor ?? DEFAULTS.textHoverColor,
+      bgColor: config.bgColor ?? DEFAULTS.bgColor,
+      hoverColor: config.hoverColor ?? DEFAULTS.hoverColor,
+      pressedColor: config.pressedColor ?? DEFAULTS.pressedColor,
+      borderColor: config.borderColor ?? DEFAULTS.borderColor,
+      borderHoverColor: config.borderHoverColor ?? DEFAULTS.borderHoverColor,
+      disabledTextColor: config.disabledTextColor ?? DEFAULTS.disabledTextColor,
+      disabledBgColor: config.disabledBgColor ?? DEFAULTS.disabledBgColor,
+      disabledBorderColor: config.disabledBorderColor ?? DEFAULTS.disabledBorderColor,
+      onClick: config.onClick ?? (() => {}),
+    };
 
-    this.bg = scene.add.rectangle(0, 0, w, h, this.bgColor);
-    this.label = scene.add.text(0, 0, config.text, {
-      fontSize: `${fontSize}px`,
-      color: textColor,
+    this.bg = scene.add.graphics();
+    this.drawBg(this.config.bgColor, this.config.borderColor);
+
+    this.label = scene.add.text(0, 0, this.config.text, {
+      fontSize: `${this.config.fontSize}px`,
+      color: this.config.textColor,
+      fontFamily: 'monospace',
     }).setOrigin(0.5);
 
     this.add([this.bg, this.label]);
     scene.add.existing(this);
 
     this.setInteractive(
-      new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h),
+      new Phaser.Geom.Rectangle(-this.btnWidth / 2, -this.btnHeight / 2, this.btnWidth, this.btnHeight),
       Phaser.Geom.Rectangle.Contains
     );
 
-    this.on('pointerover', () => this.bg.setFillStyle(this.hoverColor));
-    this.on('pointerout', () => this.bg.setFillStyle(this.bgColor));
-    this.on('pointerdown', () => this.bg.setFillStyle(this.pressedColor));
-    this.on('pointerup', () => {
-      this.bg.setFillStyle(this.hoverColor);
-      this.onClick();
+    this.on('pointerover', () => {
+      if (!this.enabled) return;
+      this.drawBg(this.config.hoverColor, this.config.borderHoverColor);
+      this.label.setColor(this.config.textHoverColor);
     });
+    this.on('pointerout', () => {
+      if (!this.enabled) return;
+      this.clickLocked = false;
+      this.drawBg(this.config.bgColor, this.config.borderColor);
+      this.label.setColor(this.config.textColor);
+    });
+    this.on('pointerdown', () => {
+      if (!this.enabled || this.clickLocked) return;
+      this.clickLocked = true;
+      this.drawBg(this.config.pressedColor, this.config.borderHoverColor);
+      this.config.onClick();
+    });
+    this.on('pointerup', () => {
+      if (!this.enabled) return;
+      this.clickLocked = false;
+      this.drawBg(this.config.hoverColor, this.config.borderHoverColor);
+    });
+  }
+
+  private drawBg(fill: number, border: number): void {
+    const w = this.btnWidth;
+    const h = this.btnHeight;
+    this.bg.clear();
+    this.bg.fillStyle(fill, 1);
+    this.bg.fillRect(-w / 2, -h / 2, w, h);
+    this.bg.lineStyle(1, border, 1);
+    this.bg.strokeRect(-w / 2, -h / 2, w, h);
+  }
+
+  setEnabled(val: boolean): this {
+    this.enabled = val;
+    if (val) {
+      this.drawBg(this.config.bgColor, this.config.borderColor);
+      this.label.setColor(this.config.textColor);
+      this.setAlpha(1);
+    } else {
+      this.drawBg(this.config.disabledBgColor, this.config.disabledBorderColor);
+      this.label.setColor(this.config.disabledTextColor);
+      this.setAlpha(0.7);
+    }
+    return this;
+  }
+
+  setText(text: string): this {
+    this.label.setText(text);
+    this.config.text = text;
+    return this;
+  }
+
+  setTextColor(color: string): this {
+    this.config.textColor = color;
+    this.label.setColor(color);
+    return this;
+  }
+
+  setSelected(selected: boolean): this {
+    if (selected && this.enabled) {
+      this.label.setColor('#ffff44');
+      this.drawBg(this.config.bgColor, 0x888822);
+    }
+    return this;
+  }
+
+  resize(w: number, h: number, fontSize?: number): this {
+    this.btnWidth = w;
+    this.btnHeight = h;
+    this.drawBg(this.config.bgColor, this.config.borderColor);
+    if (this.input) {
+      const rect = this.input.hitArea as Phaser.Geom.Rectangle;
+      rect.setTo(-w / 2, -h / 2, w, h);
+    }
+    if (fontSize !== undefined) {
+      this.config.fontSize = fontSize;
+      this.label.setFontSize(fontSize);
+    }
+    return this;
   }
 }

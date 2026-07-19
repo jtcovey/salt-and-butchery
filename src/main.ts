@@ -1,15 +1,23 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
-import { WorldScene } from './scenes/WorldScene';
+import { PartyCreationScene } from './scenes/PartyCreationScene';
+import { WorldMapScene } from './scenes/WorldMapScene';
+import { CombatScene } from './scenes/CombatScene';
 import { InventoryScene } from './scenes/InventoryScene';
+
+import './style.css';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 820,
-  height: 540,
-  backgroundColor: '#000000',
-  scene: [BootScene, MenuScene, WorldScene, InventoryScene],
+  backgroundColor: '#0a0a14',
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    parent: 'game-container',
+    width: '100%',
+    height: '100%',
+  },
+  scene: [BootScene, MenuScene, PartyCreationScene, WorldMapScene, CombatScene, InventoryScene],
 };
 
 new Phaser.Game(config);
