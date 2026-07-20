@@ -857,8 +857,9 @@ export class CombatScene extends Phaser.Scene {
 
     // Options button — top right of game area
     const s = this.coords.scale;
-    this.optionsBtn.setPosition(topBar.x + topBar.w - s * 0.8, topBar.h / 2);
-    this.optionsBtn.resize(Math.round(s * 0.8), Math.round(s * 0.8), this.coords.fontSize(0.018));
+    const oBtnSize = Math.round(s * 1.6);
+    this.optionsBtn.setPosition(topBar.x + topBar.w - oBtnSize / 2 - 4, topBar.h / 2);
+    this.optionsBtn.resize(oBtnSize, oBtnSize, this.coords.fontSize(0.025));
 
     this.drawLog();
   }
