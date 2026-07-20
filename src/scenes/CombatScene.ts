@@ -254,7 +254,7 @@ export class CombatScene extends Phaser.Scene {
 
   private trySelectPC(worldPos: { x: number; y: number }): boolean {
     const clicked = this.party.find(c => !c.dead && !c.status.includes('beaten') && !c.turnDone &&
-      this.movement.distance(c, worldPos) <= c.radius + 0.5);
+      this.movement.distance(c, worldPos) <= c.radius);
     if (!clicked || clicked === this.turns.selectedPC) return false;
     this.turns.selectPC(clicked);
     this.mode = 'move';
