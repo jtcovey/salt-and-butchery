@@ -14,7 +14,7 @@ export class VFXRenderer {
   }
 
   curseBolt(fromX: number, fromY: number, toX: number, toY: number): void {
-    this.projectile(fromX, fromY, toX, toY, 0xcc2222, 2.5, 200);
+    this.beam(fromX, fromY, toX, toY, 0xcc2222, 2.5, 200);
   }
 
   healGlow(targetX: number, targetY: number): void {
@@ -53,6 +53,36 @@ export class VFXRenderer {
         gfx.clear();
         gfx.lineStyle(thickness, color, 1 - t * 0.3);
         gfx.lineBetween(tailX, tailY, headX, headY);
+
+        if (t >= 1) {
+          gfx.clear();
+          gfx.destroy();
+          event.destroy();
+        }
+      },
+    });
+  }
+
+  private beam(
+    fromWX: number, fromWY: number, toWX: number, toWY: number,
+    color: number, thickness: number, duration: number,
+  ): void {
+    const gfx = this.scene.add.graphics().setDepth(15);
+    const from = this.coords.worldToScreen(fromWX, fromWY);
+    const to = this.coords.worldToScreen(toWX, toWY);
+
+    let elapsed = 0;
+    const event = this.scene.time.addEvent({
+      delay: 16,
+      repeat: Math.ceil(duration / 16),
+      callback: () => {
+        elapsed += 16;
+        const t = Math.min(1, elapsed / duration);
+        const alpha = 1 - t;
+
+        gfx.clear();
+        gfx.lineStyle(thickness, color, alpha);
+        gfx.lineBetween(from.x, from.y, to.x, to.y);
 
         if (t >= 1) {
           gfx.clear();
