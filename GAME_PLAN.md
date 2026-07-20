@@ -83,21 +83,29 @@ Each action has: `id`, `label`, `range`, `target`, optional `numericRange`, opti
 - PC selection requires clicking **inside** the circle (distance ≤ radius), not the tolerance zone — prevents accidental selection when moving near allies
 - Auto End Turn option: when enabled, auto-ends a PC's turn once they've acted and hit 0 stamina
 
+### SFX System (`src/systems/SFXSystem.ts`)
+Sound effects tied to combat log reports — `logMsg()` takes an optional `SFXId` parameter, plays the sound at the moment the log entry appears.
+
+12 sounds sourced from freesound.org (CC0): `hit`, `hitRanged`, `miss`, `bless`, `heal`, `curse`, `frenzy`, `deathHero`, `deathMonster`, `victory`, `defeat`, `levelUp`.
+
+Volume controlled by `GameOptions.sfxVolume` (0.0–1.0, default 0.5). Audio files loaded on CombatScene create, cached so re-entering the scene doesn't reload.
+
 ### Options System (`src/config/GameOptions.ts`)
 Global options singleton, toggled from OptionsScene:
 - **God Mode** (off by default): heroes take no HP damage when hit
 - **Auto End Turn** (off by default): auto-ends PC turn after action + 0 stamina
+- **SFX Volume** (50% default): draggable slider in Options menu, 0–100%
 
 ### Scene Flow
 ```
-BootScene → MenuScene → PartyCreationScene → WorldMapScene → CombatScene
+BootScene → MenuScene → PartyCreationScene → CombatScene  (WorldMapScene skipped for now)
                 ↓
           OptionsScene
                                                           ↔ InventoryScene
 ```
 
 - **PartyCreationScene**: 4 enabled slots by default (Ragnar/warrior, Skiv/thief, Aldric/sorcerer, S.Mara/cleric). Each slot is self-contained with name input, 2×2 class buttons, body type toggle. Slots 5-6 can be enabled by clicking. Max 1 sorcerer, max 1 cleric enforced.
-- **OptionsScene**: toggle buttons for God Mode and Auto End Turn. Reachable from main menu; `returnTo` param allows future access from pause/combat.
+- **OptionsScene**: toggle buttons for God Mode and Auto End Turn, plus draggable SFX Volume slider. Reachable from main menu; `returnTo` param allows future access from pause/combat.
 - **CombatScene**: wires all systems together. Modes: select → move → targeting. Default encounter: 4 PCs vs 3 melee + 2 archer skeletons.
 
 ### Key Files
@@ -109,7 +117,8 @@ BootScene → MenuScene → PartyCreationScene → WorldMapScene → CombatScene
 - `src/systems/TurnSystem.ts` — turn order, phase management, status cleanup
 - `src/systems/AISystem.ts` — enemy decision-making
 - `src/entities/` — Character, PC, NPC, Inventory
-- `src/config/GameOptions.ts` — global options (godMode, autoEndTurn)
+- `src/config/GameOptions.ts` — global options (godMode, autoEndTurn, sfxVolume)
+- `src/systems/SFXSystem.ts` — audio system, loads/plays sounds keyed by SFXId
 - `src/actions/` — Action interface, classActions definitions
 - `src/render/` — TerrainRenderer, UnitRenderer
 - `src/ui/` — UIButton, RangeIndicator
@@ -134,8 +143,9 @@ BootScene → MenuScene → PartyCreationScene → WorldMapScene → CombatScene
 - [ ] Simple attack/heal/curse visual effects (flash, particle)
 
 #### 2. SFX Pass
-- [ ] Tie sound effects to combat log events
-- [ ] Hit/miss/block/kill/heal/curse sounds
+- [x] Tie sound effects to combat log events (SFXSystem)
+- [x] Hit/miss/kill/heal/bless/curse/frenzy/victory/defeat sounds
+- [x] SFX volume control in Options menu
 - [ ] UI click sounds for buttons
 - [ ] Turn transition audio cue
 
