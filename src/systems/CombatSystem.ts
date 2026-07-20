@@ -1,5 +1,6 @@
 import type { Combatant, StatusEffect } from '../types';
 import { d8 } from '../core/Dice';
+import { GameOptions } from '../config/GameOptions';
 
 export interface AttackResult {
   hit: boolean;
@@ -22,7 +23,7 @@ export interface CurseResult {
 }
 
 export class CombatSystem {
-  attack(attacker: Combatant, target: Combatant, skillBonus: number, damage: number): AttackResult {
+  attack(attacker: Combatant, target: Combatant, skillBonus: number, damage: number, targetIsPC = false): AttackResult {
     const targetAC = this.effectiveAC(target);
 
     if (target.wardStacks && target.wardStacks > 0) {
@@ -40,6 +41,10 @@ export class CombatSystem {
 
     if (!hit) {
       return { hit: false, roll, total, targetAC, damage: 0, killed: false, beaten: false, wardBlocked: false };
+    }
+
+    if (targetIsPC && GameOptions.godMode) {
+      return { hit: true, roll, total, targetAC, damage: 0, killed: false, beaten: false, wardBlocked: false };
     }
 
     target.hp -= damage;

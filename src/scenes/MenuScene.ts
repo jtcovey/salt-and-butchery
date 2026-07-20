@@ -7,6 +7,7 @@ export class MenuScene extends Phaser.Scene {
   private titleText!: Phaser.GameObjects.Text;
   private subtitleText!: Phaser.GameObjects.Text;
   private startBtn!: UIButton;
+  private optionsBtn!: UIButton;
 
   constructor() { super({ key: 'MenuScene' }); }
 
@@ -26,6 +27,14 @@ export class MenuScene extends Phaser.Scene {
       onClick: () => this.scene.start('PartyCreationScene'),
     });
 
+    this.optionsBtn = new UIButton(this, 0, 0, {
+      text: 'OPTIONS', width: 240, height: 52, fontSize: 20,
+      bgColor: 0x1a1a0a, hoverColor: 0x2a2a14, pressedColor: 0x3a3a1e,
+      borderColor: 0x444422, borderHoverColor: 0x888844,
+      textColor: '#cc8844', textHoverColor: '#ffaa66',
+      onClick: () => this.scene.start('OptionsScene', { returnTo: 'MenuScene' }),
+    });
+
     this.scale.on('resize', () => this.reflow());
     this.reflow();
   }
@@ -41,7 +50,10 @@ export class MenuScene extends Phaser.Scene {
 
     const btnW = Math.max(200, this.coords.canvasWidth * 0.18);
     const btnH = Math.max(46, this.coords.canvasHeight * 0.07);
+    const fontSize = this.coords.fontSize(0.028);
     this.startBtn.setPosition(cx, cy + this.coords.canvasHeight * 0.12);
-    this.startBtn.resize(btnW, btnH, this.coords.fontSize(0.028));
+    this.startBtn.resize(btnW, btnH, fontSize);
+    this.optionsBtn.setPosition(cx, cy + this.coords.canvasHeight * 0.22);
+    this.optionsBtn.resize(btnW, btnH, fontSize);
   }
 }

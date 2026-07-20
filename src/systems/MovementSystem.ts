@@ -92,6 +92,57 @@ export class MovementSystem {
     return obstacles.some(obs => this.distance(pos, obs) < radius + obs.radius);
   }
 
+  resolveMove(
+    mover: { x: number; y: number; radius: number },
+    target: Vec2,
+    blockers: Array<{ x: number; y: number; radius: number }>,
+  ): Vec2 {
+    const dx = target.x - mover.x;
+    const dy = target.y - mover.y;
+    const moveDist = Math.sqrt(dx * dx + dy * dy);
+    if (moveDist < 0.01) return { x: mover.x, y: mover.y };
+
+    let closestT = 1;
+
+    for (const b of blockers) {
+      const t = this.circleContactT(mover, target, mover.radius, b, b.radius);
+      if (t !== null && t < closestT) closestT = t;
+    }
+
+    closestT = Math.max(0, closestT - 0.01);
+
+    return {
+      x: mover.x + dx * closestT,
+      y: mover.y + dy * closestT,
+    };
+  }
+
+  private circleContactT(
+    from: Vec2, to: Vec2, moverRadius: number,
+    center: Vec2, centerRadius: number,
+  ): number | null {
+    const combinedR = moverRadius + centerRadius;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const fx = from.x - center.x;
+    const fy = from.y - center.y;
+
+    const a = dx * dx + dy * dy;
+    if (a === 0) return null;
+
+    const b = 2 * (fx * dx + fy * dy);
+    const c = fx * fx + fy * fy - combinedR * combinedR;
+
+    if (c <= 0) return 0;
+
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return null;
+
+    const t = (-b - Math.sqrt(disc)) / (2 * a);
+    if (t < 0 || t > 1) return null;
+    return t;
+  }
+
   facingFrom(from: Vec2, to: Vec2): number {
     return Math.atan2(to.y - from.y, to.x - from.x);
   }

@@ -13,6 +13,7 @@ import { UIButton } from '../ui/UIButton';
 import { PC } from '../entities/PC';
 import { NPC } from '../entities/NPC';
 import { LAYOUT, UNIT_RADIUS, RANGED_RANGE, MELEE_RANGE } from '../config/constants';
+import { GameOptions } from '../config/GameOptions';
 import { SWORD, BOW } from '../data/items';
 
 type CombatMode = 'select' | 'move' | 'targeting';
@@ -214,11 +215,17 @@ export class CombatScene extends Phaser.Scene {
 
   private endCurrentTurn(): void {
     if (this.animating || this.turns.phase !== 'player') return;
-    this.logMsg(`Player phase ends.`);
+    const pc = this.turns.selectedPC;
+    if (!pc || pc.turnDone) return;
+    this.logMsg(`${pc.name} ends turn.`);
     this.undoSnapshot = null;
     this.activeAction = null;
-    this.mode = 'select';
-    this.turns.endPlayerPhase();
+    this.turns.endCharTurn(pc);
+    if (this.turns.phase === 'player') {
+      this.mode = 'move';
+    } else {
+      this.mode = 'select';
+    }
     this.redraw();
   }
 
@@ -246,7 +253,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private trySelectPC(worldPos: { x: number; y: number }): boolean {
-    const clicked = this.party.find(c => !c.dead && !c.status.includes('beaten') &&
+    const clicked = this.party.find(c => !c.dead && !c.status.includes('beaten') && !c.turnDone &&
       this.movement.distance(c, worldPos) <= c.radius + 0.5);
     if (!clicked || clicked === this.turns.selectedPC) return false;
     this.turns.selectPC(clicked);
@@ -260,10 +267,14 @@ export class CombatScene extends Phaser.Scene {
   private handleMoveClick(worldPos: { x: number; y: number }): void {
     const pc = this.turns.selectedPC;
     if (!pc) return;
-    if (!this.movement.canReach(pc, worldPos)) return;
-    if (this.movement.isPositionBlocked(worldPos, pc.radius, this.obstacles)) return;
 
-    const dist = this.movement.distance(pc, worldPos);
+    const blockers = this.getAllBlockers(pc);
+    const resolved = this.movement.resolveMove(pc, worldPos, blockers);
+
+    const dist = this.movement.distance(pc, resolved);
+    if (dist < 0.05) return;
+
+    if (dist > this.movement.maxMoveRange(pc)) return;
     const cost = this.movement.staminaCost(pc, dist);
     if (cost > pc.stamina) return;
 
@@ -278,13 +289,47 @@ export class CombatScene extends Phaser.Scene {
     pc.stamina -= cost;
     pc.staminaMovesThisTurn += cost;
     pc.movesUsedThisTurn += dist;
-    pc.facing = this.movement.facingFrom(pc, worldPos);
-    pc.x = worldPos.x;
-    pc.y = worldPos.y;
+    pc.facing = this.movement.facingFrom(pc, resolved);
+    pc.x = resolved.x;
+    pc.y = resolved.y;
 
     const moveType = cost > 0 ? `moves (-${cost} stam)` : 'moves';
     this.logMsg(`${pc.name} ${moveType} ${dist.toFixed(1)} units.`);
+    this.checkAutoEndTurn(pc);
     this.redraw();
+  }
+
+  private getAllBlockers(exclude: PC): Array<{ x: number; y: number; radius: number }> {
+    const blockers: Array<{ x: number; y: number; radius: number }> = [];
+    for (const c of this.party) {
+      if (c !== exclude && !c.dead) blockers.push(c);
+    }
+    for (const e of this.enemies) {
+      blockers.push(e);
+    }
+    for (const obs of this.obstacles) {
+      blockers.push(obs);
+    }
+    return blockers;
+  }
+
+  private checkAutoEndTurn(pc: PC): void {
+    if (!GameOptions.autoEndTurn) return;
+    if (pc.hasActed && pc.stamina <= 0) {
+      this.time.delayedCall(100, () => {
+        if (pc.turnDone) return;
+        this.logMsg(`${pc.name} auto-ends turn.`);
+        this.undoSnapshot = null;
+        this.activeAction = null;
+        this.turns.endCharTurn(pc);
+        if (this.turns.phase === 'player') {
+          this.mode = 'move';
+        } else {
+          this.mode = 'select';
+        }
+        this.redraw();
+      });
+    }
   }
 
   private handleActionButton(index: number): void {
@@ -337,6 +382,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.mode = 'move';
     this.activeAction = null;
+    this.checkAutoEndTurn(pc);
     this.redraw();
   }
 
@@ -399,6 +445,7 @@ export class CombatScene extends Phaser.Scene {
     if (this.turns.checkVictory()) { this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
     this.mode = 'move';
     this.activeAction = null;
+    this.checkAutoEndTurn(pc);
     this.redraw();
   }
 
@@ -442,6 +489,7 @@ export class CombatScene extends Phaser.Scene {
     } else {
       this.mode = 'move';
       this.activeAction = null;
+      this.checkAutoEndTurn(pc);
       this.redraw();
     }
   }
@@ -511,6 +559,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.mode = 'move';
     this.activeAction = null;
+    this.checkAutoEndTurn(pc);
     this.redraw();
   }
 
@@ -545,7 +594,7 @@ export class CombatScene extends Phaser.Scene {
             e.y = action.destination.y;
             this.logMsg(`${e.name} moves.`);
           } else if ((action.type === 'attack' || action.type === 'ranged_attack') && action.target) {
-            const result = this.combat.attack(e, action.target, e.strength, e.weaponDamage);
+            const result = this.combat.attack(e, action.target, e.strength, e.weaponDamage, true);
             if (result.hit) {
               this.logMsg(`${e.name} hits ${action.target.name}! (${result.total} vs AC${result.targetAC}) -${result.damage}HP`);
               if (result.beaten) this.logMsg(`  → ${action.target.name} is BEATEN!`);
@@ -628,12 +677,13 @@ export class CombatScene extends Phaser.Scene {
       if (!this.hpTexts[i]) return;
       const colHex = '#' + c.color.toString(16).padStart(6, '0');
       const fontSize = this.coords.fontSize(0.018);
+      const doneMarker = c.turnDone && !c.dead && !c.status.includes('beaten') ? ' ✓' : '';
       this.hpTexts[i].setPosition(topBar.x + 12 + i * (topBar.w / 6), topBar.h / 2)
         .setOrigin(0, 0.5)
-        .setText(`${c.name} ${c.hp}/${c.maxHp}`)
+        .setText(`${c.name} ${c.hp}/${c.maxHp}${doneMarker}`)
         .setColor(colHex)
         .setFontSize(fontSize)
-        .setAlpha(c.dead ? 0.3 : c.status.includes('beaten') ? 0.5 : 1);
+        .setAlpha(c.dead ? 0.3 : c.status.includes('beaten') ? 0.5 : c.turnDone ? 0.4 : 1);
     });
 
     // Side panel
@@ -688,7 +738,9 @@ export class CombatScene extends Phaser.Scene {
     const endY = btnStartY + actions.length * btnGap + 8;
     this.endTurnBtn.setPosition(panel.x + panel.w / 2, endY);
     this.endTurnBtn.resize(btnW, btnH, btnFontSize);
+    this.endTurnBtn.setText(pc ? `END ${pc.name.toUpperCase()}'S TURN` : 'END TURN');
     this.endTurnBtn.setVisible(this.turns.phase === 'player');
+    this.endTurnBtn.setEnabled(!!pc && !pc.turnDone);
 
     // Undo button
     if (this.undoSnapshot) {
