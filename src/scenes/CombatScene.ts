@@ -7,6 +7,7 @@ import { CombatSystem } from '../systems/CombatSystem';
 import { TurnSystem } from '../systems/TurnSystem';
 import { AISystem } from '../systems/AISystem';
 import { TerrainRenderer } from '../render/TerrainRenderer';
+import type { TileOverlay, SaltBody } from '../render/TerrainRenderer';
 import { UnitRenderer } from '../render/UnitRenderer';
 import { RangeIndicator } from '../ui/RangeIndicator';
 import { UIButton } from '../ui/UIButton';
@@ -35,6 +36,9 @@ export class CombatScene extends Phaser.Scene {
   private party: PC[] = [];
   private enemies: NPC[] = [];
   private obstacles: Obstacle[] = [];
+  private terrainGrid: number[][] | null = null;
+  private saltBodies: SaltBody[] = [];
+  private tileOverlays: Map<string, TileOverlay> = new Map();
 
   private mode: CombatMode = 'select';
   private activeAction: Action | null = null;
@@ -63,6 +67,7 @@ export class CombatScene extends Phaser.Scene {
   private endTurnBtn!: UIButton;
   private moveInfoText!: Phaser.GameObjects.Text;
   private undoBtn!: UIButton;
+  private optionsBtn!: UIButton;
 
   constructor() { super({ key: 'CombatScene' }); }
 
@@ -75,20 +80,71 @@ export class CombatScene extends Phaser.Scene {
     this.movement = new MovementSystem();
     this.combat = new CombatSystem();
 
-    if (this.party.length === 0) this.buildDefaultParty();
-    this.buildDefaultEnemies();
-
-    this.turns = new TurnSystem(this.party, this.enemies);
-    this.ai = new AISystem(this.movement);
-    this.sfx = new SFXSystem(this);
-    this.sfx.preload();
-
     this.terrain = new TerrainRenderer(this, this.coords);
     this.unitRenderer = new UnitRenderer(this, this.coords);
     this.rangeIndicator = new RangeIndicator(this, this.coords);
+    this.sfx = new SFXSystem(this);
+    this.sfx.preload();
 
     this.buildUI();
     this.setupInput();
+
+    this.events.on('resume', () => this.redraw());
+
+    this.loadLevel('levels/TestMap1.json');
+  }
+
+  private async loadLevel(path: string): Promise<void> {
+    try {
+      const resp = await fetch(path);
+      const data = await resp.json();
+
+      if (data.terrainGrid) {
+        this.terrainGrid = data.terrainGrid;
+        this.movement.setTerrainGrid(data.terrainGrid);
+      }
+
+      if (data.partySpawn && this.party.length > 0) {
+        for (let i = 0; i < Math.min(this.party.length, data.partySpawn.length); i++) {
+          this.party[i].x = data.partySpawn[i].x;
+          this.party[i].y = data.partySpawn[i].y;
+        }
+      } else if (this.party.length === 0) {
+        this.buildDefaultParty();
+      }
+
+      if (data.enemies && data.enemies.length > 0) {
+        this.buildEnemiesFromData(data.enemies);
+      } else {
+        this.buildDefaultEnemies();
+      }
+    } catch {
+      if (this.party.length === 0) this.buildDefaultParty();
+      this.buildDefaultEnemies();
+    }
+
+    this.finishSetup();
+  }
+
+  private buildEnemiesFromData(spawns: Array<{ type: string; x: number; y: number; name?: string }>): void {
+    this.enemies = spawns.map((s, i) => {
+      const isArcher = s.type === 'skeleton_archer';
+      const e = new NPC({
+        id: `e${i}`, name: s.name || `Enemy-${i}`,
+        hp: 1, maxHp: 1, ac: 3, strength: 0,
+        x: s.x, y: s.y, radius: UNIT_RADIUS,
+        color: isArcher ? 0xcc4488 : 0xcc6622,
+        weaponDamage: 1,
+        label: isArcher ? 'A' : undefined,
+      });
+      e.inventory.items.push(isArcher ? BOW : SWORD);
+      return e;
+    });
+  }
+
+  private finishSetup(): void {
+    this.turns = new TurnSystem(this.party, this.enemies);
+    this.ai = new AISystem(this.movement);
 
     this.turns.onPhaseChange = (_phase) => this.onPhaseChange(_phase);
     this.turns.onEnemyPhaseStart = () => this.runEnemyPhase();
@@ -180,6 +236,15 @@ export class CombatScene extends Phaser.Scene {
       onClick: () => this.undoMove(),
     });
     this.undoBtn.setDepth(10).setVisible(false);
+
+    this.optionsBtn = new UIButton(this, 0, 0, {
+      text: 'O', width: 32, height: 32, fontSize: 14,
+      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
+      borderColor: 0x334466, borderHoverColor: 0x5588cc,
+      textColor: '#aabbff', textHoverColor: '#ffffff',
+      onClick: () => this.openOptions(),
+    });
+    this.optionsBtn.setDepth(10);
   }
 
   private setupInput(): void {
@@ -209,6 +274,10 @@ export class CombatScene extends Phaser.Scene {
     });
 
     this.input.keyboard!.on('keydown-ENTER', () => this.endCurrentTurn());
+    this.input.keyboard!.on('keydown-G', () => {
+      GameOptions.showGrid = !GameOptions.showGrid;
+      this.redraw();
+    });
     this.scale.on('resize', () => this.redraw());
 
     // Log scrolling via mouse wheel over the panel
@@ -292,12 +361,15 @@ export class CombatScene extends Phaser.Scene {
       hasActedBefore: pc.hasActed,
     };
 
+    const oldX = pc.x;
+    const oldY = pc.y;
     pc.stamina -= cost;
     pc.staminaMovesThisTurn += cost;
     pc.movesUsedThisTurn += dist;
     pc.facing = this.movement.facingFrom(pc, resolved);
     pc.x = resolved.x;
     pc.y = resolved.y;
+    this.disperseSaltBodies(oldX, oldY, pc.x, pc.y);
 
     const moveType = cost > 0 ? `moves (-${cost} stam)` : 'moves';
     this.logMsg(`${pc.name} ${moveType} ${dist.toFixed(1)} units.`);
@@ -415,12 +487,14 @@ export class CombatScene extends Phaser.Scene {
   private resolveConeAttack(pc: PC): void {
     const range = this.getActionRange(pc, this.activeAction!);
     const targets = this.enemies.filter(e => {
-      if (!this.movement.isInRange(pc, e, range)) return false;
+      const dist = this.movement.distance(pc, e);
+      if (dist - e.radius > range) return false;
       const angleToEnemy = Math.atan2(e.y - pc.y, e.x - pc.x);
       let diff = angleToEnemy - this.coneAngle;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
-      return Math.abs(diff) <= Math.PI / 2;
+      const angularRadius = dist > 0 ? Math.asin(Math.min(1, e.radius / dist)) : Math.PI;
+      return Math.abs(diff) <= Math.PI / 2 + angularRadius;
     });
 
     if (targets.length === 0) {
@@ -438,6 +512,7 @@ export class CombatScene extends Phaser.Scene {
       if (result.wardBlocked) {
         this.logMsg(`  → ${target.name}: blocked by Ward!`);
       } else if (result.hit) {
+        this.addBloodAt(target.x, target.y);
         this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) -${result.damage}HP`, 'hit');
         if (result.killed || result.beaten) {
           this.logMsg(`  → ${target.name} destroyed!`, 'deathMonster');
@@ -463,7 +538,14 @@ export class CombatScene extends Phaser.Scene {
     if (!target) return;
 
     const range = this.getActionRange(pc, action);
-    if (!this.movement.isInRange(pc, target, range)) return;
+    if (this.movement.distance(pc, target) - target.radius > range) return;
+
+    const isPhysicalRanged = pc.inventory.equippedWeaponType() === 'ranged' &&
+      (action.id === 'attack' || action.id === 'trick_shot');
+    if (isPhysicalRanged && !this.movement.hasLineOfSight(pc, target)) {
+      this.logMsg(`No line of sight to ${target.name}!`);
+      return;
+    }
 
     if (this.attacksRemaining === (action.attacks ?? 1)) {
       pc.stamina--;
@@ -508,6 +590,7 @@ export class CombatScene extends Phaser.Scene {
     if (result.wardBlocked) {
       this.logMsg(`  → ${target.name}: blocked by Ward!`);
     } else if (result.hit) {
+      this.addBloodAt(target.x, target.y);
       this.logMsg(`  → ${target.name}: HIT (${result.roll}+${skill}=${result.total} vs AC${result.targetAC}) -${result.damage}HP`, isRanged ? 'hitRanged' : 'hit');
       if (result.killed || result.beaten) {
         this.logMsg(`  → ${target.name} destroyed!`, 'deathMonster');
@@ -524,6 +607,7 @@ export class CombatScene extends Phaser.Scene {
       this.logMsg(`  → ${target.name}: blocked by Ward!`);
     } else if (result.salted) {
       this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) TURNED TO SALT!`, 'curse');
+      this.saltBodies.push({ x: target.x, y: target.y, radius: target.radius });
       this.killEnemy(target);
     } else {
       this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`, 'miss');
@@ -538,7 +622,7 @@ export class CombatScene extends Phaser.Scene {
     if (!target) return;
 
     const range = this.getActionRange(pc, action);
-    if (!this.movement.isInRange(pc, target, range)) return;
+    if (this.movement.distance(pc, target) - target.radius > range) return;
 
     switch (action.id) {
       case 'heal': {
@@ -596,13 +680,20 @@ export class CombatScene extends Phaser.Scene {
         const actions = this.ai.decideActions(e, this.party, this.obstacles);
         for (const action of actions) {
           if (action.type === 'move' && action.destination) {
+            const prevX = e.x, prevY = e.y;
             e.facing = this.movement.facingFrom(e, action.destination);
             e.x = action.destination.x;
             e.y = action.destination.y;
+            this.disperseSaltBodies(prevX, prevY, e.x, e.y);
             this.logMsg(`${e.name} moves.`);
           } else if ((action.type === 'attack' || action.type === 'ranged_attack') && action.target) {
+            if (action.type === 'ranged_attack' && !this.movement.hasLineOfSight(e, action.target)) {
+              this.logMsg(`${e.name} has no line of sight.`);
+              continue;
+            }
             const result = this.combat.attack(e, action.target, e.strength, e.weaponDamage, true);
             if (result.hit) {
+              this.addBloodAt(action.target.x, action.target.y);
               this.logMsg(`${e.name} hits ${action.target.name}! (${result.total} vs AC${result.targetAC}) -${result.damage}HP`, 'hit');
               if (result.beaten) this.logMsg(`  → ${action.target.name} is BEATEN!`, 'deathHero');
               if (result.killed) this.logMsg(`  → ${action.target.name} is SLAIN!`, 'deathHero');
@@ -616,7 +707,12 @@ export class CombatScene extends Phaser.Scene {
         if (i === this.enemies.length - 1) {
           this.time.delayedCall(400, () => {
             this.animating = false;
-            if (this.turns.checkDefeat()) { this.logMsg('✗ DEFEAT', 'defeat'); this.redraw(); return; }
+            if (this.turns.checkDefeat()) {
+              const dur = this.logMsg('✗ DEFEAT', 'defeat');
+              this.redraw();
+              this.time.delayedCall(Math.max(dur, 500), () => this.showDefeatOverlay());
+              return;
+            }
             this.turns.endEnemyPhase();
             this.logMsg(`—— Turn ${this.turns.turn}: Player Phase ——`);
             this.mode = 'move';
@@ -641,7 +737,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private redraw(): void {
-    this.terrain.draw(this.obstacles);
+    this.terrain.draw(this.obstacles, this.terrainGrid ?? undefined, this.tileOverlays, this.saltBodies);
     this.unitRenderer.draw(this.party, this.enemies, this.turns.selectedPC?.id ?? null);
 
     this.rangeIndicator.clear();
@@ -759,12 +855,18 @@ export class CombatScene extends Phaser.Scene {
       this.undoBtn.setVisible(false);
     }
 
+    // Options button — top right of game area
+    const s = this.coords.scale;
+    this.optionsBtn.setPosition(topBar.x + topBar.w - s * 0.8, topBar.h / 2);
+    this.optionsBtn.resize(Math.round(s * 0.8), Math.round(s * 0.8), this.coords.fontSize(0.018));
+
     this.drawLog();
   }
 
   private drawLog(): void {
     const panel = this.coords.regionPixels(LAYOUT.sidePanel);
-    const logTop = panel.y + panel.h * 0.45;
+    const btnH = Math.max(22, panel.h * 0.032);
+    const logTop = panel.y + panel.h * 0.45 + btnH * 0.7;
     const logH = panel.h * 0.53;
     const fontSize = this.coords.fontSize(0.013);
     const maxVisible = 10;
@@ -794,10 +896,76 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  private logMsg(msg: string, sfx?: SFXId): void {
+  private addBloodAt(x: number, y: number): void {
+    const col = Math.floor(x);
+    const row = Math.floor(y);
+    const key = `${col},${row}`;
+    if (!this.tileOverlays.has(key)) {
+      this.tileOverlays.set(key, 'blood');
+    }
+  }
+
+  private disperseSaltBodies(fromX: number, fromY: number, toX: number, toY: number): void {
+    for (let i = this.saltBodies.length - 1; i >= 0; i--) {
+      const body = this.saltBodies[i];
+      if (this.linePassesNearPoint(fromX, fromY, toX, toY, body.x, body.y, body.radius + UNIT_RADIUS)) {
+        const col = Math.floor(body.x);
+        const row = Math.floor(body.y);
+        this.tileOverlays.set(`${col},${row}`, 'salt');
+        this.logMsg(`A salt body crumbles to dust.`);
+        this.saltBodies.splice(i, 1);
+      }
+    }
+  }
+
+  private linePassesNearPoint(ax: number, ay: number, bx: number, by: number, px: number, py: number, threshold: number): boolean {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return Math.sqrt((ax - px) ** 2 + (ay - py) ** 2) < threshold;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    const cx = ax + t * dx;
+    const cy = ay + t * dy;
+    return Math.sqrt((cx - px) ** 2 + (cy - py) ** 2) < threshold;
+  }
+
+  private openOptions(): void {
+    this.scene.launch('OptionsScene', { returnTo: 'CombatScene', overlay: true });
+    this.scene.pause();
+  }
+
+  private logMsg(msg: string, sfx?: SFXId): number {
     this.log.push(msg);
     if (this.log.length > 200) this.log.shift();
     this.logScroll = Math.max(0, this.log.length - 10);
-    if (sfx) this.sfx.play(sfx);
+    if (sfx) return this.sfx.play(sfx);
+    return 0;
+  }
+
+  private showDefeatOverlay(): void {
+    const w = this.coords.canvasWidth;
+    const h = this.coords.canvasHeight;
+
+    const overlay = this.add.graphics().setDepth(50);
+    overlay.fillStyle(0x000000, 0.85);
+    overlay.fillRect(0, 0, w, h);
+
+    this.add.text(w / 2, h * 0.35, 'DEFEATED', {
+      fontSize: `${this.coords.fontSize(0.08)}px`,
+      color: '#aa2222',
+      fontStyle: 'bold',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(51);
+
+    const btnW = Math.max(200, w * 0.2);
+    const btnH = Math.max(40, h * 0.06);
+    const btn = new UIButton(this, w / 2, h * 0.55, {
+      text: 'ACCEPT DEATH', width: btnW, height: btnH, fontSize: this.coords.fontSize(0.025),
+      bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
+      borderColor: 0x662222, borderHoverColor: 0xaa4444,
+      textColor: '#cc6644', textHoverColor: '#ffaa66',
+      onClick: () => this.scene.start('MenuScene'),
+    });
+    btn.setDepth(51);
   }
 }

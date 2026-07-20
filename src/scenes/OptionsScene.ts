@@ -9,6 +9,7 @@ export class OptionsScene extends Phaser.Scene {
   private toggleBtns: UIButton[] = [];
   private backBtn!: UIButton;
   private returnScene = 'MenuScene';
+  private overlay = false;
 
   // Volume slider
   private sliderGfx!: Phaser.GameObjects.Graphics;
@@ -21,20 +22,30 @@ export class OptionsScene extends Phaser.Scene {
 
   constructor() { super({ key: 'OptionsScene' }); }
 
-  init(data?: { returnTo?: string }) {
+  init(data?: { returnTo?: string; overlay?: boolean }) {
     if (data?.returnTo) this.returnScene = data.returnTo;
+    this.overlay = data?.overlay ?? false;
   }
 
   create() {
     this.coords = new CoordinateSystem(this);
+    this.toggleBtns = [];
+
+    if (this.overlay) {
+      const bg = this.add.graphics();
+      bg.fillStyle(0x000000, 0.7);
+      bg.fillRect(0, 0, this.coords.canvasWidth, this.coords.canvasHeight);
+      bg.setDepth(0);
+    }
 
     this.titleText = this.add.text(0, 0, 'OPTIONS', {
       fontSize: '28px', color: '#cc8844', fontStyle: 'bold', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    const toggles: Array<{ key: 'godMode' | 'autoEndTurn'; label: string }> = [
+    const toggles: Array<{ key: 'godMode' | 'autoEndTurn' | 'showGrid'; label: string }> = [
       { key: 'godMode', label: 'GOD MODE' },
       { key: 'autoEndTurn', label: 'AUTO END TURN' },
+      { key: 'showGrid', label: 'SHOW GRID' },
     ];
 
     for (const toggle of toggles) {
@@ -70,7 +81,7 @@ export class OptionsScene extends Phaser.Scene {
       bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
       borderColor: 0x442222, borderHoverColor: 0x884444,
       textColor: '#cc8844', textHoverColor: '#ffaa66',
-      onClick: () => this.scene.start(this.returnScene),
+      onClick: () => this.closeOptions(),
     });
 
     this.scale.on('resize', () => this.reflow());
@@ -118,6 +129,15 @@ export class OptionsScene extends Phaser.Scene {
 
     const pct = Math.round(GameOptions.sfxVolume * 100);
     this.sliderLabel.setText(`SFX VOLUME: ${pct}%`);
+  }
+
+  private closeOptions(): void {
+    if (this.overlay) {
+      this.scene.resume(this.returnScene);
+      this.scene.stop();
+    } else {
+      this.scene.start(this.returnScene);
+    }
   }
 
   private toggleLabel(name: string, on: boolean): string {

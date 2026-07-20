@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S&B Map Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e; color: #ccc; font-family: monospace;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+    user-select: none;
+  }
+
+  /* Toolbar */
+  #toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: #16213e; border-bottom: 1px solid #334;
+    flex-shrink: 0;
+  }
+  #toolbar label { color: #aa8844; font-size: 13px; }
+  #toolbar input[type="text"] {
+    background: #0f1a2e; border: 1px solid #445; color: #eee;
+    padding: 4px 8px; font-family: monospace; font-size: 13px; width: 200px;
+  }
+  .tb-btn {
+    background: #1a2a4a; border: 1px solid #446; color: #aabbdd;
+    padding: 5px 14px; font-family: monospace; font-size: 13px; cursor: pointer;
+  }
+  .tb-btn:hover { background: #2a3a5a; border-color: #668; color: #ddeeff; }
+
+  /* Main area */
+  #main {
+    display: flex; flex: 1; overflow: hidden;
+  }
+
+  /* Canvas wrapper */
+  #canvas-wrap {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    background: #111122; overflow: hidden;
+  }
+  #grid-canvas { cursor: crosshair; }
+
+  /* Sidebar */
+  #sidebar {
+    width: 170px; background: #16213e; border-left: 1px solid #334;
+    display: flex; flex-direction: column; flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .layer-tabs {
+    display: flex; border-bottom: 1px solid #334;
+  }
+  .layer-tab {
+    flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
+    cursor: pointer; background: #1a2a3a; color: #888; border: none;
+    border-bottom: 2px solid transparent;
+  }
+  .layer-tab.active { color: #aabbff; border-bottom-color: #6688cc; background: #1a2a4a; }
+  .layer-tab:hover { color: #bbccff; }
+
+  .palette-section { padding: 8px; }
+  .palette-label { font-size: 11px; color: #666; margin-bottom: 6px; text-transform: uppercase; }
+
+  .tool-btn {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 6px 8px; margin-bottom: 3px;
+    background: #1a2a3a; border: 1px solid #334; color: #aaa;
+    font-family: monospace; font-size: 12px; cursor: pointer; text-align: left;
+  }
+  .tool-btn:hover { background: #2a3a5a; color: #ddd; }
+  .tool-btn.active { border-color: #88aaff; color: #aabbff; background: #2a3a5a; }
+
+  .tool-swatch {
+    width: 16px; height: 16px; border: 1px solid #555; border-radius: 2px; flex-shrink: 0;
+  }
+
+  /* Status bar */
+  #statusbar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 12px; background: #16213e; border-top: 1px solid #334;
+    font-size: 12px; color: #888; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <label>Map:</label>
+  <input type="text" id="map-name" value="Untitled" />
+  <button class="tb-btn" id="btn-new">New</button>
+  <button class="tb-btn" id="btn-save">Save JSON</button>
+  <button class="tb-btn" id="btn-load">Load JSON</button>
+  <input type="file" id="file-input" accept=".json" style="display:none" />
+</div>
+
+<div id="main">
+  <div id="canvas-wrap">
+    <canvas id="grid-canvas"></canvas>
+  </div>
+  <div id="sidebar">
+    <div class="layer-tabs">
+      <button class="layer-tab active" data-layer="terrain">Terrain</button>
+      <button class="layer-tab" data-layer="characters">Chars</button>
+    </div>
+    <div id="palette-terrain" class="palette-section">
+      <div class="palette-label">Tiles</div>
+      <button class="tool-btn active" data-tool="grass">
+        <span class="tool-swatch" style="background:#2a5a2a"></span> Grass (G)
+      </button>
+      <button class="tool-btn" data-tool="rock">
+        <span class="tool-swatch" style="background:#4a4a4a"></span> Rock (R)
+      </button>
+    </div>
+    <div id="palette-characters" class="palette-section" style="display:none">
+      <div class="palette-label">Heroes</div>
+      <button class="tool-btn" data-tool="hero_1">
+        <span class="tool-swatch" style="background:#4488ff"></span> Hero 1 (1)
+      </button>
+      <button class="tool-btn" data-tool="hero_2">
+        <span class="tool-swatch" style="background:#44cc44"></span> Hero 2 (2)
+      </button>
+      <button class="tool-btn" data-tool="hero_3">
+        <span class="tool-swatch" style="background:#aa44cc"></span> Hero 3 (3)
+      </button>
+      <button class="tool-btn" data-tool="hero_4">
+        <span class="tool-swatch" style="background:#cccc44"></span> Hero 4 (4)
+      </button>
+      <button class="tool-btn" data-tool="hero_5">
+        <span class="tool-swatch" style="background:#44cccc"></span> Hero 5 (5)
+      </button>
+      <button class="tool-btn" data-tool="hero_6">
+        <span class="tool-swatch" style="background:#cc8844"></span> Hero 6 (6)
+      </button>
+      <div class="palette-label" style="margin-top:8px">Enemies</div>
+      <button class="tool-btn" data-tool="skeleton_melee">
+        <span class="tool-swatch" style="background:#cc6622"></span> Skeleton (M)
+      </button>
+      <button class="tool-btn" data-tool="skeleton_archer">
+        <span class="tool-swatch" style="background:#cc4488"></span> Archer (A)
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="statusbar">
+  <span id="status-text">Ready</span>
+  <span>Grid: 60 x 40</span>
+</div>
+
+<script>
+const COLS = 60;
+const ROWS = 40;
+const TILE_GRASS = 0;
+const TILE_ROCK = 1;
+
+const TILE_COLORS = { 0: '#2a5a2a', 1: '#4a4a4a' };
+const TILE_NAMES = { 0: 'Grass', 1: 'Rock' };
+
+const CHAR_COLORS = {
+  hero_1: '#4488ff', hero_2: '#44cc44', hero_3: '#aa44cc',
+  hero_4: '#cccc44', hero_5: '#44cccc', hero_6: '#cc8844',
+  skeleton_melee: '#cc6622', skeleton_archer: '#cc4488',
+};
+const CHAR_LABELS = {
+  hero_1: '1', hero_2: '2', hero_3: '3',
+  hero_4: '4', hero_5: '5', hero_6: '6',
+  skeleton_melee: 'S', skeleton_archer: 'A',
+};
+const CHAR_NAMES = {
+  hero_1: 'Hero 1', hero_2: 'Hero 2', hero_3: 'Hero 3',
+  hero_4: 'Hero 4', hero_5: 'Hero 5', hero_6: 'Hero 6',
+  skeleton_melee: 'Skeleton Melee', skeleton_archer: 'Skeleton Archer',
+};
+
+const DEFAULT_HEROES = [
+  { type: 'hero_1', col: 8, row: 12 },
+  { type: 'hero_2', col: 8, row: 18 },
+  { type: 'hero_3', col: 8, row: 24 },
+  { type: 'hero_4', col: 8, row: 30 },
+];
+
+// State
+let terrainGrid = [];
+let characters = [];
+let currentLayer = 'terrain';
+let currentTool = 'grass';
+let mouseDown = false;
+let hoverCol = -1;
+let hoverRow = -1;
+let tilePx = 12;
+
+const canvas = document.getElementById('grid-canvas');
+const ctx = canvas.getContext('2d');
+
+function initGrid() {
+  terrainGrid = [];
+  for (let r = 0; r < ROWS; r++) {
+    terrainGrid.push(new Array(COLS).fill(TILE_GRASS));
+  }
+  characters = DEFAULT_HEROES.map(h => ({ ...h }));
+  document.getElementById('map-name').value = 'Untitled';
+}
+
+function resizeCanvas() {
+  const wrap = document.getElementById('canvas-wrap');
+  const maxW = wrap.clientWidth - 20;
+  const maxH = wrap.clientHeight - 20;
+  tilePx = Math.max(4, Math.floor(Math.min(maxW / COLS, maxH / ROWS)));
+  canvas.width = COLS * tilePx;
+  canvas.height = ROWS * tilePx;
+  render();
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Tiles
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.fillStyle = TILE_COLORS[terrainGrid[r][c]] || TILE_COLORS[0];
+      ctx.fillRect(c * tilePx, r * tilePx, tilePx, tilePx);
+    }
+  }
+
+  // Gridlines
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 0.5;
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c * tilePx, 0);
+    ctx.lineTo(c * tilePx, ROWS * tilePx);
+    ctx.stroke();
+  }
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * tilePx);
+    ctx.lineTo(COLS * tilePx, r * tilePx);
+    ctx.stroke();
+  }
+
+  // Characters
+  const charRadius = tilePx * 0.38;
+  for (const ch of characters) {
+    const cx = (ch.col + 0.5) * tilePx;
+    const cy = (ch.row + 0.5) * tilePx;
+    ctx.fillStyle = CHAR_COLORS[ch.type] || '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, charRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(8, tilePx * 0.5)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(CHAR_LABELS[ch.type] || '?', cx, cy);
+  }
+
+  // Hover highlight
+  if (hoverCol >= 0 && hoverCol < COLS && hoverRow >= 0 && hoverRow < ROWS) {
+    ctx.fillStyle = currentLayer === 'terrain'
+      ? 'rgba(255,255,255,0.12)'
+      : 'rgba(100,150,255,0.15)';
+    ctx.fillRect(hoverCol * tilePx, hoverRow * tilePx, tilePx, tilePx);
+    ctx.strokeStyle = '#aabbff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hoverCol * tilePx + 0.5, hoverRow * tilePx + 0.5, tilePx - 1, tilePx - 1);
+  }
+}
+
+function getTileFromMouse(e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  return { col: Math.floor(x / tilePx), row: Math.floor(y / tilePx) };
+}
+
+function applyTool(col, row) {
+  if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+
+  if (currentLayer === 'terrain') {
+    const tileId = currentTool === 'rock' ? TILE_ROCK : TILE_GRASS;
+    if (terrainGrid[row][col] !== tileId) {
+      terrainGrid[row][col] = tileId;
+      render();
+    }
+  } else {
+    const existing = characters.findIndex(c => c.col === col && c.row === row);
+    const isHero = currentTool.startsWith('hero_');
+
+    if (existing >= 0 && characters[existing].type === currentTool) {
+      characters.splice(existing, 1);
+    } else {
+      if (isHero) {
+        const prevIdx = characters.findIndex(c => c.type === currentTool);
+        if (prevIdx >= 0) characters.splice(prevIdx, 1);
+      }
+      if (existing >= 0) characters.splice(existing, 1);
+      characters.push({ type: currentTool, col, row });
+    }
+    render();
+  }
+}
+
+function updateStatus(col, row) {
+  const el = document.getElementById('status-text');
+  if (col < 0 || col >= COLS || row < 0 || row >= ROWS) {
+    el.textContent = 'Ready';
+    return;
+  }
+  const tileName = TILE_NAMES[terrainGrid[row][col]] || 'Unknown';
+  const charHere = characters.find(c => c.col === col && c.row === row);
+  const charInfo = charHere ? ` | ${CHAR_NAMES[charHere.type] || charHere.type}` : '';
+  el.textContent = `Tile (${col}, ${row}) - ${tileName}${charInfo}`;
+}
+
+// Canvas input
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 2) return;
+  mouseDown = true;
+  const { col, row } = getTileFromMouse(e);
+  applyTool(col, row);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const { col, row } = getTileFromMouse(e);
+  if (col !== hoverCol || row !== hoverRow) {
+    hoverCol = col;
+    hoverRow = row;
+    updateStatus(col, row);
+    if (mouseDown && currentLayer === 'terrain') {
+      applyTool(col, row);
+    } else {
+      render();
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+canvas.addEventListener('mouseleave', () => {
+  mouseDown = false;
+  hoverCol = -1; hoverRow = -1;
+  updateStatus(-1, -1);
+  render();
+});
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const { col, row } = getTileFromMouse(e);
+  if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+    if (currentLayer === 'terrain') {
+      terrainGrid[row][col] = TILE_GRASS;
+    } else {
+      const idx = characters.findIndex(c => c.col === col && c.row === row);
+      if (idx >= 0) characters.splice(idx, 1);
+    }
+    render();
+  }
+});
+
+// Layer tabs
+document.querySelectorAll('.layer-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.layer-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentLayer = tab.dataset.layer;
+
+    document.getElementById('palette-terrain').style.display =
+      currentLayer === 'terrain' ? 'block' : 'none';
+    document.getElementById('palette-characters').style.display =
+      currentLayer === 'characters' ? 'block' : 'none';
+
+    if (currentLayer === 'terrain') {
+      currentTool = 'grass';
+    } else {
+      currentTool = 'hero_1';
+    }
+    updateToolHighlight();
+  });
+});
+
+// Tool buttons
+document.querySelectorAll('.tool-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentTool = btn.dataset.tool;
+    updateToolHighlight();
+  });
+});
+
+function updateToolHighlight() {
+  document.querySelectorAll('.tool-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === currentTool);
+  });
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  const key = e.key.toLowerCase();
+
+  if (key === 'g') { currentLayer = 'terrain'; currentTool = 'grass'; }
+  else if (key === 'r') { currentLayer = 'terrain'; currentTool = 'rock'; }
+  else if (key === 'm') { switchToChars(); currentTool = 'skeleton_melee'; }
+  else if (key === 'a') { switchToChars(); currentTool = 'skeleton_archer'; }
+  else if (key >= '1' && key <= '6') { switchToChars(); currentTool = 'hero_' + key; }
+  else return;
+
+  if (currentLayer === 'terrain') {
+    document.querySelectorAll('.layer-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.layer === 'terrain');
+    });
+    document.getElementById('palette-terrain').style.display = 'block';
+    document.getElementById('palette-characters').style.display = 'none';
+  }
+  updateToolHighlight();
+});
+
+function switchToChars() {
+  currentLayer = 'characters';
+  document.querySelectorAll('.layer-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.layer === 'characters');
+  });
+  document.getElementById('palette-terrain').style.display = 'none';
+  document.getElementById('palette-characters').style.display = 'block';
+}
+
+// Save
+document.getElementById('btn-save').addEventListener('click', () => {
+  const mapName = document.getElementById('map-name').value.trim() || 'Untitled';
+  const partySpawn = [];
+  const enemies = [];
+  let enemyMeleeCount = 0;
+  let enemyArcherCount = 0;
+
+  for (const ch of characters) {
+    const wx = ch.col + 0.5;
+    const wy = ch.row + 0.5;
+    if (ch.type.startsWith('hero_')) {
+      partySpawn.push({ x: wx, y: wy, slot: parseInt(ch.type.split('_')[1]) });
+    } else if (ch.type === 'skeleton_melee') {
+      enemyMeleeCount++;
+      enemies.push({ type: 'skeleton_melee', x: wx, y: wy, name: 'Bone-' + enemyMeleeCount });
+    } else if (ch.type === 'skeleton_archer') {
+      enemyArcherCount++;
+      enemies.push({ type: 'skeleton_archer', x: wx, y: wy, name: 'Bow-' + enemyArcherCount });
+    }
+  }
+
+  partySpawn.sort((a, b) => a.slot - b.slot);
+
+  const data = {
+    formatVersion: 1,
+    id: mapName.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+    name: mapName,
+    arenaWidth: COLS,
+    arenaHeight: ROWS,
+    tileSize: 1,
+    terrainGrid,
+    partySpawn: partySpawn.map(p => ({ x: p.x, y: p.y })),
+    enemies,
+    obstacles: [],
+  };
+
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = mapName.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Load
+document.getElementById('btn-load').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (!data.terrainGrid || !Array.isArray(data.terrainGrid)) {
+        alert('Invalid map file: missing terrainGrid');
+        return;
+      }
+      if (data.terrainGrid.length !== ROWS || data.terrainGrid[0].length !== COLS) {
+        alert(`Grid size mismatch: expected ${COLS}x${ROWS}, got ${data.terrainGrid[0]?.length}x${data.terrainGrid.length}`);
+        return;
+      }
+
+      terrainGrid = data.terrainGrid.map(row => [...row]);
+      characters = [];
+
+      if (data.partySpawn) {
+        data.partySpawn.forEach((spawn, i) => {
+          characters.push({
+            type: 'hero_' + (i + 1),
+            col: Math.floor(spawn.x),
+            row: Math.floor(spawn.y),
+          });
+        });
+      }
+
+      if (data.enemies) {
+        data.enemies.forEach(en => {
+          characters.push({
+            type: en.type || 'skeleton_melee',
+            col: Math.floor(en.x),
+            row: Math.floor(en.y),
+          });
+        });
+      }
+
+      document.getElementById('map-name').value = data.name || 'Untitled';
+      render();
+    } catch (err) {
+      alert('Failed to load map: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// New
+document.getElementById('btn-new').addEventListener('click', () => {
+  if (!confirm('Clear current map and start fresh?')) return;
+  initGrid();
+  render();
+});
+
+// Init
+window.addEventListener('resize', resizeCanvas);
+initGrid();
+resizeCanvas();
+</script>
+</body>
+</html>
