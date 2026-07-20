@@ -79,8 +79,10 @@ export class UIButton extends Phaser.GameObjects.Container {
     this.add([this.bg, this.label]);
     scene.add.existing(this);
 
+    const hw = Math.round(Math.round(this.btnWidth) / 2);
+    const hh = Math.round(Math.round(this.btnHeight) / 2);
     this.setInteractive(
-      new Phaser.Geom.Rectangle(-this.btnWidth / 2, -this.btnHeight / 2, this.btnWidth, this.btnHeight),
+      new Phaser.Geom.Rectangle(-hw, -hh, hw * 2, hh * 2),
       Phaser.Geom.Rectangle.Contains
     );
 
@@ -109,13 +111,15 @@ export class UIButton extends Phaser.GameObjects.Container {
   }
 
   private drawBg(fill: number, border: number): void {
-    const w = this.btnWidth;
-    const h = this.btnHeight;
+    const w = Math.round(this.btnWidth);
+    const h = Math.round(this.btnHeight);
+    const x = -Math.round(w / 2);
+    const y = -Math.round(h / 2);
     this.bg.clear();
     this.bg.fillStyle(fill, 1);
-    this.bg.fillRect(-w / 2, -h / 2, w, h);
+    this.bg.fillRect(x, y, w, h);
     this.bg.lineStyle(1, border, 1);
-    this.bg.strokeRect(-w / 2, -h / 2, w, h);
+    this.bg.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   }
 
   setEnabled(val: boolean): this {
@@ -153,12 +157,14 @@ export class UIButton extends Phaser.GameObjects.Container {
   }
 
   resize(w: number, h: number, fontSize?: number): this {
-    this.btnWidth = w;
-    this.btnHeight = h;
+    this.btnWidth = Math.round(w);
+    this.btnHeight = Math.round(h);
     this.drawBg(this.config.bgColor, this.config.borderColor);
     if (this.input) {
       const rect = this.input.hitArea as Phaser.Geom.Rectangle;
-      rect.setTo(-w / 2, -h / 2, w, h);
+      const hw = Math.round(this.btnWidth / 2);
+      const hh = Math.round(this.btnHeight / 2);
+      rect.setTo(-hw, -hh, hw * 2, hh * 2);
     }
     if (fontSize !== undefined) {
       this.config.fontSize = fontSize;

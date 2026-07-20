@@ -158,19 +158,19 @@ export class OptionsScene extends Phaser.Scene {
     const startY = cy - gap * (this.toggleBtns.length) / 2;
 
     this.toggleBtns.forEach((btn, i) => {
-      btn.setPosition(cx, startY + i * gap);
+      btn.setPosition(Math.round(cx), Math.round(startY + i * gap));
       btn.resize(btnW, btnH, fontSize);
     });
 
     // Volume slider below toggles
     const sliderSlotY = startY + this.toggleBtns.length * gap;
-    this.sliderX = cx;
-    this.sliderY = sliderSlotY + 12;
-    this.sliderW = btnW;
-    this.sliderLabel.setPosition(cx, sliderSlotY - 10).setFontSize(fontSize);
+    this.sliderX = Math.round(cx);
+    this.sliderY = Math.round(sliderSlotY + 12);
+    this.sliderW = Math.round(btnW);
+    this.sliderLabel.setPosition(Math.round(cx), Math.round(sliderSlotY - 10)).setFontSize(fontSize);
     this.drawSlider();
 
-    this.backBtn.setPosition(cx, this.sliderY + 40);
+    this.backBtn.setPosition(Math.round(cx), Math.round(this.sliderY + 40));
     this.backBtn.resize(btnW, btnH, fontSize);
   }
 }
