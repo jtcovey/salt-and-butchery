@@ -17,10 +17,12 @@ export class Item {
 
 export class WeaponItem extends Item {
   readonly weaponType: 'melee' | 'ranged';
+  readonly damage: number;
 
-  constructor(id: string, name: string, weaponType: 'melee' | 'ranged') {
+  constructor(id: string, name: string, weaponType: 'melee' | 'ranged', damage = 1) {
     super(id, name, 'weapon');
     this.weaponType = weaponType;
+    this.damage = damage;
   }
 }
 

@@ -48,15 +48,18 @@ export interface Obstacle {
 }
 
 export interface EncounterData {
+  formatVersion?: number;
   id: string;
   name: string;
   enemies: EnemySpawn[];
   obstacles: ObstacleData[];
   arenaWidth: number;
   arenaHeight: number;
+  tileSize?: number;
+  terrainGrid?: number[][];
   partySpawn: Vec2[];
-  victoryRoute: { map: string; position: Vec2 };
-  defeatRoute: { scene: string };
+  victoryRoute?: { map: string; position: Vec2 };
+  defeatRoute?: { scene: string };
 }
 
 export interface EnemySpawn {

@@ -4,6 +4,7 @@ import { CoordinateSystem } from '../core/CoordinateSystem';
 import { UIButton } from '../ui/UIButton';
 import { CLASS_COLOR, CLASS_BASE_HP, CLASS_SKILL, UNIT_RADIUS } from '../config/constants';
 import { PC } from '../entities/PC';
+import { SWORD, BOW, LEATHER_ARMOR, MAIL_ARMOR } from '../data/items';
 
 interface Slot {
   enabled: boolean;
@@ -194,13 +195,23 @@ export class PartyCreationScene extends Phaser.Scene {
       const skill = CLASS_SKILL[def.charClass];
       const skills = { strength: 0, dexterity: 0, intelligence: 0, wisdom: 0 };
       skills[skill] = 1;
-      return new PC({
+      const pc = new PC({
         id: `p${i}`, name: def.name, charClass: def.charClass, level: 1,
         hp: CLASS_BASE_HP[def.charClass], maxHp: CLASS_BASE_HP[def.charClass],
         ac: 4, stamina: 1, maxStamina: 1, skills,
         x: 8, y: 8 + i * 5, radius: UNIT_RADIUS,
-        color: CLASS_COLOR[def.charClass], weaponDamage: 1,
+        color: CLASS_COLOR[def.charClass],
       });
+
+      if (def.charClass === 'thief') {
+        pc.inventory.items.push(BOW, LEATHER_ARMOR);
+      } else if (def.charClass === 'warrior') {
+        pc.inventory.items.push(SWORD, MAIL_ARMOR);
+      } else {
+        pc.inventory.items.push(SWORD, LEATHER_ARMOR);
+      }
+
+      return pc;
     });
 
     this.scene.start('CombatScene', { party });

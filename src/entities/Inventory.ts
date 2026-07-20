@@ -20,6 +20,10 @@ export class Inventory {
     return this.equippedArmor()?.acBonus ?? 0;
   }
 
+  weaponDamage(): number {
+    return this.equippedWeapon()?.damage ?? 1;
+  }
+
   hasItem(type: ItemType): boolean {
     return this.items.some(i => i.type === type);
   }

@@ -34,9 +34,12 @@ export class SFXSystem {
     this.scene.load.start();
   }
 
-  play(id: SFXId): void {
-    if (!this.loaded || !this.scene.cache.audio.exists(id)) return;
-    this.scene.sound.play(id, { volume: GameOptions.sfxVolume });
+  play(id: SFXId): number {
+    if (!this.loaded || !this.scene.cache.audio.exists(id)) return 0;
+    const sound = this.scene.sound.add(id, { volume: GameOptions.sfxVolume });
+    sound.play();
+    sound.once('complete', () => sound.destroy());
+    return sound.duration * 1000;
   }
 }
 

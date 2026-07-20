@@ -29,13 +29,27 @@ export class AISystem {
     const isRanged = enemy.inventory.equippedWeaponType() === 'ranged';
 
     if (isRanged) {
-      if (this.movement.isInRange(enemy, nearest, RANGED_RANGE)) {
-        actions.push({ type: 'ranged_attack', target: nearest });
+      const visibleTargets = targets.filter(c =>
+        this.movement.isInRange(enemy, c, RANGED_RANGE) && this.movement.hasLineOfSight(enemy, c)
+      );
+
+      if (visibleTargets.length > 0) {
+        const best = visibleTargets.reduce((b, c) =>
+          this.movement.distance(enemy, c) < this.movement.distance(enemy, b) ? c : b
+        );
+        actions.push({ type: 'ranged_attack', target: best });
       } else {
         const dest = this.moveToward(enemy, nearest, MOVE_PER_STAMINA, obstacles);
         if (dest) actions.push({ type: 'move', destination: dest });
-        if (this.movement.isInRange({ x: dest?.x ?? enemy.x, y: dest?.y ?? enemy.y }, nearest, RANGED_RANGE)) {
-          actions.push({ type: 'ranged_attack', target: nearest });
+        const pos = { x: dest?.x ?? enemy.x, y: dest?.y ?? enemy.y };
+        const visibleAfterMove = targets.filter(c =>
+          this.movement.isInRange(pos, c, RANGED_RANGE) && this.movement.hasLineOfSight(pos, c)
+        );
+        if (visibleAfterMove.length > 0) {
+          const best = visibleAfterMove.reduce((b, c) =>
+            this.movement.distance(pos, c) < this.movement.distance(pos, b) ? c : b
+          );
+          actions.push({ type: 'ranged_attack', target: best });
         }
       }
     } else {
@@ -45,7 +59,7 @@ export class AISystem {
         const dest = this.moveToward(enemy, nearest, MOVE_PER_STAMINA, obstacles);
         if (dest) {
           actions.push({ type: 'move', destination: dest });
-          const movedEnemy = { ...enemy, x: dest.x, y: dest.y };
+          const movedEnemy = { ...enemy, x: dest.x, y: dest.y, weaponDamage: enemy.weaponDamage };
           if (this.movement.isAdjacent(movedEnemy, nearest)) {
             actions.push({ type: 'attack', target: nearest });
           }
@@ -56,21 +70,21 @@ export class AISystem {
     return actions;
   }
 
-  private moveToward(enemy: NPC, target: PC, maxDist: number, obstacles: Obstacle[]): { x: number; y: number } | null {
+  private moveToward(enemy: NPC, target: PC, maxDist: number, _obstacles: Obstacle[]): { x: number; y: number } | null {
     const dist = this.movement.distance(enemy, target);
     if (dist <= 0) return null;
+
+    const gridDest = this.movement.findGridPath(enemy, target, maxDist);
+    if (gridDest) return gridDest;
 
     const moveAmount = Math.min(maxDist, dist - enemy.radius - target.radius);
     if (moveAmount <= 0) return null;
 
     const dx = target.x - enemy.x;
     const dy = target.y - enemy.y;
-    const goal = {
+    return {
       x: enemy.x + (dx / dist) * moveAmount,
       y: enemy.y + (dy / dist) * moveAmount,
     };
-
-    const path = this.movement.findPath(enemy, goal, enemy.radius, obstacles);
-    return path.length > 0 ? path[path.length - 1] : null;
   }
 }
