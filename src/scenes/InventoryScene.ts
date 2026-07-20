@@ -1,8 +1,6 @@
 import Phaser from 'phaser';
-import type { WorldScene } from './WorldScene';
 import type { PC } from '../entities/PC';
 import { ArmorItem, WeaponItem } from '../entities/Item';
-
 
 export class InventoryScene extends Phaser.Scene {
   private boxGroup!: Phaser.GameObjects.Group;
@@ -17,54 +15,32 @@ export class InventoryScene extends Phaser.Scene {
   }
 
   private buildStaticUI() {
-    const TOP_BAR = 60;
+    const w = this.scale.width;
+    const h = this.scale.height;
 
-    // Full dark background
-    this.add.rectangle(0, 0, 820, TOP_BAR + 480, 0x080814).setOrigin(0, 0);
+    this.add.rectangle(0, 0, w, h, 0x080814).setOrigin(0, 0);
 
-    // Top control bar separator
-    const topBar = this.add.graphics().setDepth(8);
-    topBar.lineStyle(1, 0x334466);
-    topBar.lineBetween(0, TOP_BAR, 820, TOP_BAR);
+    this.add.text(w / 2, 30, 'INVENTORY', {
+      fontSize: '16px', color: '#ccddff', fontStyle: 'bold',
+    }).setOrigin(0.5);
 
-    // Right panel (below control bar)
-    const panel = this.add.graphics().setDepth(8);
-    panel.fillStyle(0x080814);
-    panel.fillRect(640, TOP_BAR, 180, 480);
-    panel.lineStyle(1, 0x334466);
-    panel.lineBetween(640, TOP_BAR, 640, TOP_BAR + 480);
+    const closeBtn = this.add.text(w - 20, 30, '[X]', {
+      fontSize: '14px', color: '#aabbff',
+    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => this.returnToGame());
 
-    // Screen title in control bar
-    this.add.text(120, TOP_BAR / 2, 'INVENTORY', {
-      fontSize: '14px', color: '#ccddff', fontStyle: 'bold',
-    }).setOrigin(0, 0.5);
-
-    // "[i]nterface" toggle button — same position as the game screen's inventory button
-    const ifaceBox = this.add.rectangle(592, TOP_BAR / 2, 92, 28, 0x0d0d1a)
-      .setStrokeStyle(1, 0x4455aa)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(9);
-    const ifaceLbl = this.add.text(592, TOP_BAR / 2, '[i]nterface', {
-      fontSize: '10px', color: '#aabbff',
-    }).setOrigin(0.5).setDepth(10);
-    ifaceBox.on('pointerdown', () => this.returnToGame());
-    ifaceBox.on('pointerover', () => ifaceLbl.setColor('#ffffff'));
-    ifaceBox.on('pointerout',  () => ifaceLbl.setColor('#aabbff'));
-
-    // 'I' key returns to game
     this.input.keyboard!.on('keydown-I', () => this.returnToGame());
   }
 
   private refreshBoxes() {
     this.boxGroup.clear(true, true);
-    const world = this.scene.get('WorldScene') as WorldScene;
-    world.getParty().forEach((pc, i) => this.buildBox(pc, i));
+    const party: PC[] = this.registry.get('party') ?? [];
+    party.forEach((pc: PC, i: number) => this.buildBox(pc, i));
   }
 
   private buildBox(pc: PC, i: number) {
-    const TOP_BAR = 60;
     const col = i % 2, row = Math.floor(i / 2);
-    const x = 12 + col * 318, y = TOP_BAR + 8 + row * 222;
+    const x = 12 + col * 318, y = 60 + row * 222;
     const w = 308, h = 210;
 
     const gfx = this.add.graphics();
@@ -109,6 +85,6 @@ export class InventoryScene extends Phaser.Scene {
   }
 
   private returnToGame() {
-    this.scene.switch('WorldScene');
+    this.scene.switch('CombatScene');
   }
 }
