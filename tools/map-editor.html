@@ -110,6 +110,9 @@
       <button class="tool-btn" data-tool="rock">
         <span class="tool-swatch" style="background:#4a4a4a"></span> Rock (R)
       </button>
+      <button class="tool-btn" data-tool="eraser">
+        <span class="tool-swatch" style="background:#1a1a2e; border-style:dashed"></span> Clear (X)
+      </button>
     </div>
     <div id="palette-characters" class="palette-section" style="display:none">
       <div class="palette-label">Heroes</div>
@@ -137,6 +140,9 @@
       </button>
       <button class="tool-btn" data-tool="skeleton_archer">
         <span class="tool-swatch" style="background:#cc4488"></span> Archer (A)
+      </button>
+      <button class="tool-btn" data-tool="eraser">
+        <span class="tool-swatch" style="background:#1a1a2e; border-style:dashed"></span> Clear (X)
       </button>
     </div>
   </div>
@@ -280,6 +286,21 @@ function getTileFromMouse(e) {
 function applyTool(col, row) {
   if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
 
+  if (currentTool === 'eraser') {
+    let changed = false;
+    if (terrainGrid[row][col] !== TILE_GRASS) {
+      terrainGrid[row][col] = TILE_GRASS;
+      changed = true;
+    }
+    const charIdx = characters.findIndex(c => c.col === col && c.row === row);
+    if (charIdx >= 0) {
+      characters.splice(charIdx, 1);
+      changed = true;
+    }
+    if (changed) render();
+    return;
+  }
+
   if (currentLayer === 'terrain') {
     const tileId = currentTool === 'rock' ? TILE_ROCK : TILE_GRASS;
     if (terrainGrid[row][col] !== tileId) {
@@ -330,7 +351,7 @@ canvas.addEventListener('mousemove', (e) => {
     hoverCol = col;
     hoverRow = row;
     updateStatus(col, row);
-    if (mouseDown && currentLayer === 'terrain') {
+    if (mouseDown && (currentLayer === 'terrain' || currentTool === 'eraser')) {
       applyTool(col, row);
     } else {
       render();
@@ -405,6 +426,7 @@ document.addEventListener('keydown', (e) => {
   else if (key === 'm') { switchToChars(); currentTool = 'skeleton_melee'; }
   else if (key === 'a') { switchToChars(); currentTool = 'skeleton_archer'; }
   else if (key >= '1' && key <= '6') { switchToChars(); currentTool = 'hero_' + key; }
+  else if (key === 'x') { currentTool = 'eraser'; }
   else return;
 
   if (currentLayer === 'terrain') {
