@@ -9,6 +9,7 @@ import { AISystem } from '../systems/AISystem';
 import { TerrainRenderer } from '../render/TerrainRenderer';
 import type { TileOverlay, SaltBody } from '../render/TerrainRenderer';
 import { UnitRenderer } from '../render/UnitRenderer';
+import { VFXRenderer } from '../render/VFXRenderer';
 import { RangeIndicator } from '../ui/RangeIndicator';
 import { UIButton } from '../ui/UIButton';
 import { PC } from '../entities/PC';
@@ -32,6 +33,7 @@ export class CombatScene extends Phaser.Scene {
   private terrain!: TerrainRenderer;
   private unitRenderer!: UnitRenderer;
   private rangeIndicator!: RangeIndicator;
+  private vfx!: VFXRenderer;
 
   private party: PC[] = [];
   private enemies: NPC[] = [];
@@ -84,6 +86,7 @@ export class CombatScene extends Phaser.Scene {
     this.terrain = new TerrainRenderer(this, this.coords);
     this.unitRenderer = new UnitRenderer(this, this.coords);
     this.rangeIndicator = new RangeIndicator(this, this.coords);
+    this.vfx = new VFXRenderer(this, this.coords);
     this.sfx = new SFXSystem(this);
     this.sfx.preload();
 
@@ -594,6 +597,7 @@ export class CombatScene extends Phaser.Scene {
 
   private resolveAttack(pc: PC, target: NPC): void {
     const isRanged = pc.inventory.equippedWeaponType() === 'ranged';
+    if (isRanged) this.vfx.arrowTrail(pc.x, pc.y, target.x, target.y);
     const skill = isRanged ? pc.skills.dexterity : pc.skills.strength;
     const result = this.combat.attack(pc, target, skill, pc.weaponDamage);
 
@@ -612,6 +616,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private resolveCurse(pc: PC, target: NPC): void {
+    this.vfx.curseBolt(pc.x, pc.y, target.x, target.y);
     const result = this.combat.curse(target, pc.skills.intelligence);
     if (result.wardBlocked) {
       this.logMsg(`  → ${target.name}: blocked by Ward!`);
@@ -644,6 +649,7 @@ export class CombatScene extends Phaser.Scene {
         const healed = this.combat.heal(target, amount);
         const revived = target.hp > 0 && healed > 0 && target.hp === healed;
         if (revived) target.turnDone = false;
+        this.vfx.healGlow(target.x, target.y);
         this.logMsg(`${pc.name} heals ${target.name} +${healed}HP (-1 stam)${revived ? ' — REVIVED!' : ''}`, 'heal');
         break;
       }
@@ -653,6 +659,7 @@ export class CombatScene extends Phaser.Scene {
         pc.hasActed = true;
         this.invalidateUndo();
         this.combat.addStatus(target, 'blessed');
+        this.vfx.blessGlow(target.x, target.y);
         this.logMsg(`${pc.name} blesses ${target.name} (+1 rolls) (-1 stam).`, 'bless');
         break;
       }
@@ -701,6 +708,7 @@ export class CombatScene extends Phaser.Scene {
               this.logMsg(`${e.name} has no line of sight.`);
               continue;
             }
+            if (action.type === 'ranged_attack') this.vfx.arrowTrail(e.x, e.y, action.target.x, action.target.y);
             const result = this.combat.attack(e, action.target, e.strength, e.weaponDamage, true);
             if (result.hit) {
               this.addBloodAt(action.target.x, action.target.y);
