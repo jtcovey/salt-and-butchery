@@ -67,6 +67,11 @@ export class TurnSystem {
     }
   }
 
+  endPlayerPhase(): void {
+    this.activeParty.forEach(c => { c.turnDone = true; });
+    this.beginEnemyPhase();
+  }
+
   beginEnemyPhase(): void {
     this.phase = 'enemy';
     this.onPhaseChange?.(this.phase);

@@ -89,6 +89,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.turns.beginPlayerTurn();
     this.logMsg(`—— Turn 1: Player Phase ——`);
+    this.mode = 'move';
     this.redraw();
   }
 
@@ -180,13 +181,14 @@ export class CombatScene extends Phaser.Scene {
       if (this.animating || this.turns.phase !== 'player') return;
       const worldPos = this.coords.screenToWorld(pointer.x, pointer.y);
       const inGame = this.coords.isInGameArea(pointer.x, pointer.y);
+      if (!inGame) return;
 
-      if (this.mode === 'move' && inGame) {
+      if (this.trySelectPC(worldPos)) return;
+
+      if (this.mode === 'move') {
         this.handleMoveClick(worldPos);
-      } else if (this.mode === 'targeting' && inGame) {
+      } else if (this.mode === 'targeting') {
         this.handleTargetClick(worldPos);
-      } else if (inGame) {
-        this.handleSelectClick(worldPos);
       }
     });
 
@@ -212,15 +214,11 @@ export class CombatScene extends Phaser.Scene {
 
   private endCurrentTurn(): void {
     if (this.animating || this.turns.phase !== 'player') return;
-    const pc = this.turns.selectedPC;
-    if (!pc) return;
-    this.logMsg(`${pc.name} ends turn.`);
+    this.logMsg(`Player phase ends.`);
     this.undoSnapshot = null;
     this.activeAction = null;
-    this.turns.endCharTurn(pc);
     this.mode = 'select';
-    const next = this.turns.selectedPC;
-    if (next) this.mode = 'move';
+    this.turns.endPlayerPhase();
     this.redraw();
   }
 
@@ -247,15 +245,16 @@ export class CombatScene extends Phaser.Scene {
     this.redraw();
   }
 
-  private handleSelectClick(worldPos: { x: number; y: number }): void {
-    const clicked = this.party.find(c => !c.dead && !c.status.includes('beaten') && !c.turnDone &&
+  private trySelectPC(worldPos: { x: number; y: number }): boolean {
+    const clicked = this.party.find(c => !c.dead && !c.status.includes('beaten') &&
       this.movement.distance(c, worldPos) <= c.radius + 0.5);
-    if (clicked) {
-      this.turns.selectPC(clicked);
-      this.mode = 'move';
-      this.activeAction = null;
-      this.redraw();
-    }
+    if (!clicked || clicked === this.turns.selectedPC) return false;
+    this.turns.selectPC(clicked);
+    this.mode = 'move';
+    this.activeAction = null;
+    this.undoSnapshot = null;
+    this.redraw();
+    return true;
   }
 
   private handleMoveClick(worldPos: { x: number; y: number }): void {
@@ -564,7 +563,7 @@ export class CombatScene extends Phaser.Scene {
             if (this.turns.checkDefeat()) { this.redraw(); return; }
             this.turns.endEnemyPhase();
             this.logMsg(`—— Turn ${this.turns.turn}: Player Phase ——`);
-            this.mode = this.turns.selectedPC ? 'move' : 'select';
+            this.mode = 'move';
             this.redraw();
           });
         }
