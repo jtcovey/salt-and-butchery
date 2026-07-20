@@ -12,6 +12,7 @@ import './style.css';
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   backgroundColor: '#0a0a14',
+  roundPixels: true,
   scale: {
     mode: Phaser.Scale.RESIZE,
     parent: 'game-container',

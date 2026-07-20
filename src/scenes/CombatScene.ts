@@ -845,7 +845,7 @@ export class CombatScene extends Phaser.Scene {
         const canUse = isActive || actions[i].canUse(pc, { party: this.party, enemies: this.enemies, obstacles: this.obstacles });
         const label = isActive ? `CANCEL ${actions[i].label}` : actions[i].label;
         btn.setVisible(true);
-        btn.setPosition(panel.x + panel.w / 2, btnStartY + i * btnGap);
+        btn.setPosition(Math.round(panel.x + panel.w / 2), Math.round(btnStartY + i * btnGap));
         btn.resize(btnW, btnH, btnFontSize);
         btn.setText(label);
         btn.setEnabled(canUse);
@@ -857,7 +857,7 @@ export class CombatScene extends Phaser.Scene {
 
     // End turn button
     const endY = btnStartY + actions.length * btnGap + 8;
-    this.endTurnBtn.setPosition(panel.x + panel.w / 2, endY);
+    this.endTurnBtn.setPosition(Math.round(panel.x + panel.w / 2), Math.round(endY));
     this.endTurnBtn.resize(btnW, btnH, btnFontSize);
     this.endTurnBtn.setText(pc ? `END ${pc.name.toUpperCase()}'S TURN` : 'END TURN');
     this.endTurnBtn.setVisible(this.turns.phase === 'player');
@@ -866,7 +866,7 @@ export class CombatScene extends Phaser.Scene {
     // Undo button
     if (this.undoSnapshot) {
       const undoY = endY + btnGap + 4;
-      this.undoBtn.setPosition(panel.x + panel.w / 2, undoY);
+      this.undoBtn.setPosition(Math.round(panel.x + panel.w / 2), Math.round(undoY));
       this.undoBtn.resize(btnW, btnH, btnFontSize);
       this.undoBtn.setVisible(true);
     } else {
@@ -876,13 +876,14 @@ export class CombatScene extends Phaser.Scene {
     // Top-right buttons: [INVENTORY] [O]
     const s = this.coords.scale;
     const oBtnSize = Math.round(s * 1.6);
-    const oBtnX = topBar.x + topBar.w - oBtnSize / 2 - 4;
-    this.optionsBtn.setPosition(oBtnX, topBar.h / 2);
+    const oBtnX = Math.round(topBar.x + topBar.w - oBtnSize / 2 - 4);
+    const oBtnY = Math.round(topBar.h / 2);
+    this.optionsBtn.setPosition(oBtnX, oBtnY);
     this.optionsBtn.resize(oBtnSize, oBtnSize, this.coords.fontSize(0.025));
 
     const invBtnW = Math.round(oBtnSize * 5);
-    const invBtnX = oBtnX - oBtnSize / 2 - invBtnW / 2 - 4;
-    this.inventoryBtn.setPosition(invBtnX, topBar.h / 2);
+    const invBtnX = Math.round(oBtnX - oBtnSize / 2 - invBtnW / 2 - 4);
+    this.inventoryBtn.setPosition(invBtnX, oBtnY);
     this.inventoryBtn.resize(invBtnW, oBtnSize, this.coords.fontSize(0.02));
 
     this.drawLog();

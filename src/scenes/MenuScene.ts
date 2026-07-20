@@ -56,9 +56,9 @@ export class MenuScene extends Phaser.Scene {
     const btnW = Math.max(200, this.coords.canvasWidth * 0.18);
     const btnH = Math.max(46, this.coords.canvasHeight * 0.07);
     const fontSize = this.coords.fontSize(0.028);
-    this.startBtn.setPosition(cx, cy + this.coords.canvasHeight * 0.12);
+    this.startBtn.setPosition(Math.round(cx), Math.round(cy + this.coords.canvasHeight * 0.12));
     this.startBtn.resize(btnW, btnH, fontSize);
-    this.optionsBtn.setPosition(cx, cy + this.coords.canvasHeight * 0.22);
+    this.optionsBtn.setPosition(Math.round(cx), Math.round(cy + this.coords.canvasHeight * 0.22));
     this.optionsBtn.resize(btnW, btnH, fontSize);
 
     this.creditText.setPosition(8, this.coords.canvasHeight - 8)
