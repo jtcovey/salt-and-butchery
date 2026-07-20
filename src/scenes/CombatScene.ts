@@ -15,6 +15,8 @@ import { NPC } from '../entities/NPC';
 import { LAYOUT, UNIT_RADIUS, RANGED_RANGE, MELEE_RANGE } from '../config/constants';
 import { GameOptions } from '../config/GameOptions';
 import { SWORD, BOW } from '../data/items';
+import { SFXSystem } from '../systems/SFXSystem';
+import type { SFXId } from '../systems/SFXSystem';
 
 type CombatMode = 'select' | 'move' | 'targeting';
 
@@ -24,6 +26,7 @@ export class CombatScene extends Phaser.Scene {
   private combat!: CombatSystem;
   private turns!: TurnSystem;
   private ai!: AISystem;
+  private sfx!: SFXSystem;
 
   private terrain!: TerrainRenderer;
   private unitRenderer!: UnitRenderer;
@@ -77,6 +80,8 @@ export class CombatScene extends Phaser.Scene {
 
     this.turns = new TurnSystem(this.party, this.enemies);
     this.ai = new AISystem(this.movement);
+    this.sfx = new SFXSystem(this);
+    this.sfx.preload();
 
     this.terrain = new TerrainRenderer(this, this.coords);
     this.unitRenderer = new UnitRenderer(this, this.coords);
@@ -184,12 +189,13 @@ export class CombatScene extends Phaser.Scene {
       const inGame = this.coords.isInGameArea(pointer.x, pointer.y);
       if (!inGame) return;
 
-      if (this.trySelectPC(worldPos)) return;
-
-      if (this.mode === 'move') {
-        this.handleMoveClick(worldPos);
-      } else if (this.mode === 'targeting') {
+      if (this.mode === 'targeting') {
         this.handleTargetClick(worldPos);
+      } else {
+        if (this.trySelectPC(worldPos)) return;
+        if (this.mode === 'move') {
+          this.handleMoveClick(worldPos);
+        }
       }
     });
 
@@ -425,24 +431,24 @@ export class CombatScene extends Phaser.Scene {
     pc.stamina--;
     pc.hasActed = true;
     this.invalidateUndo();
-    this.logMsg(`${pc.name} uses FRENZY (-1 stam)!`);
+    this.logMsg(`${pc.name} uses FRENZY (-1 stam)!`, 'frenzy');
 
     for (const target of targets) {
       const result = this.combat.attack(pc, target, pc.skills.strength, pc.weaponDamage);
       if (result.wardBlocked) {
         this.logMsg(`  → ${target.name}: blocked by Ward!`);
       } else if (result.hit) {
-        this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) -${result.damage}HP`);
+        this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) -${result.damage}HP`, 'hit');
         if (result.killed || result.beaten) {
-          this.logMsg(`  → ${target.name} destroyed!`);
+          this.logMsg(`  → ${target.name} destroyed!`, 'deathMonster');
           this.killEnemy(target);
         }
       } else {
-        this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`);
+        this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`, 'miss');
       }
     }
 
-    if (this.turns.checkVictory()) { this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
     this.mode = 'move';
     this.activeAction = null;
     this.checkAutoEndTurn(pc);
@@ -481,7 +487,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.attacksRemaining--;
 
-    if (this.turns.checkVictory()) { this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
 
     if (this.attacksRemaining > 0 && this.enemies.length > 0) {
       this.logMsg(`  (${this.attacksRemaining} shot${this.attacksRemaining > 1 ? 's' : ''} remaining)`);
@@ -502,13 +508,13 @@ export class CombatScene extends Phaser.Scene {
     if (result.wardBlocked) {
       this.logMsg(`  → ${target.name}: blocked by Ward!`);
     } else if (result.hit) {
-      this.logMsg(`  → ${target.name}: HIT (${result.roll}+${skill}=${result.total} vs AC${result.targetAC}) -${result.damage}HP`);
+      this.logMsg(`  → ${target.name}: HIT (${result.roll}+${skill}=${result.total} vs AC${result.targetAC}) -${result.damage}HP`, isRanged ? 'hitRanged' : 'hit');
       if (result.killed || result.beaten) {
-        this.logMsg(`  → ${target.name} destroyed!`);
+        this.logMsg(`  → ${target.name} destroyed!`, 'deathMonster');
         this.killEnemy(target);
       }
     } else {
-      this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`);
+      this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`, 'miss');
     }
   }
 
@@ -517,10 +523,10 @@ export class CombatScene extends Phaser.Scene {
     if (result.wardBlocked) {
       this.logMsg(`  → ${target.name}: blocked by Ward!`);
     } else if (result.salted) {
-      this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) TURNED TO SALT!`);
+      this.logMsg(`  → ${target.name}: HIT (${result.total} vs AC${result.targetAC}) TURNED TO SALT!`, 'curse');
       this.killEnemy(target);
     } else {
-      this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`);
+      this.logMsg(`  → ${target.name}: MISS (${result.total} vs AC${result.targetAC})`, 'miss');
     }
   }
 
@@ -543,7 +549,8 @@ export class CombatScene extends Phaser.Scene {
         const amount = 1 + pc.skills.wisdom;
         const healed = this.combat.heal(target, amount);
         const revived = target.hp > 0 && healed > 0 && target.hp === healed;
-        this.logMsg(`${pc.name} heals ${target.name} +${healed}HP (-1 stam)${revived ? ' — REVIVED!' : ''}`);
+        if (revived) target.turnDone = false;
+        this.logMsg(`${pc.name} heals ${target.name} +${healed}HP (-1 stam)${revived ? ' — REVIVED!' : ''}`, 'heal');
         break;
       }
       case 'bless': {
@@ -552,7 +559,7 @@ export class CombatScene extends Phaser.Scene {
         pc.hasActed = true;
         this.invalidateUndo();
         this.combat.addStatus(target, 'blessed');
-        this.logMsg(`${pc.name} blesses ${target.name} (+1 rolls) (-1 stam).`);
+        this.logMsg(`${pc.name} blesses ${target.name} (+1 rolls) (-1 stam).`, 'bless');
         break;
       }
     }
@@ -596,11 +603,11 @@ export class CombatScene extends Phaser.Scene {
           } else if ((action.type === 'attack' || action.type === 'ranged_attack') && action.target) {
             const result = this.combat.attack(e, action.target, e.strength, e.weaponDamage, true);
             if (result.hit) {
-              this.logMsg(`${e.name} hits ${action.target.name}! (${result.total} vs AC${result.targetAC}) -${result.damage}HP`);
-              if (result.beaten) this.logMsg(`  → ${action.target.name} is BEATEN!`);
-              if (result.killed) this.logMsg(`  → ${action.target.name} is SLAIN!`);
+              this.logMsg(`${e.name} hits ${action.target.name}! (${result.total} vs AC${result.targetAC}) -${result.damage}HP`, 'hit');
+              if (result.beaten) this.logMsg(`  → ${action.target.name} is BEATEN!`, 'deathHero');
+              if (result.killed) this.logMsg(`  → ${action.target.name} is SLAIN!`, 'deathHero');
             } else {
-              this.logMsg(`${e.name} misses ${action.target.name}. (${result.total} vs AC${result.targetAC})`);
+              this.logMsg(`${e.name} misses ${action.target.name}. (${result.total} vs AC${result.targetAC})`, 'miss');
             }
           }
         }
@@ -609,7 +616,7 @@ export class CombatScene extends Phaser.Scene {
         if (i === this.enemies.length - 1) {
           this.time.delayedCall(400, () => {
             this.animating = false;
-            if (this.turns.checkDefeat()) { this.redraw(); return; }
+            if (this.turns.checkDefeat()) { this.logMsg('✗ DEFEAT', 'defeat'); this.redraw(); return; }
             this.turns.endEnemyPhase();
             this.logMsg(`—— Turn ${this.turns.turn}: Player Phase ——`);
             this.mode = 'move';
@@ -714,7 +721,7 @@ export class CombatScene extends Phaser.Scene {
     const btnW = Math.max(90, panel.w * 0.85);
     const btnH = Math.max(22, h * 0.032);
     const btnFontSize = this.coords.fontSize(0.015);
-    const btnStartY = panel.y + h * 0.09;
+    const btnStartY = panel.y + h * 0.09 + btnH * 0.5;
     const btnGap = btnH + 4;
 
     for (let i = 0; i < this.actionBtns.length; i++) {
@@ -787,9 +794,10 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  private logMsg(msg: string): void {
+  private logMsg(msg: string, sfx?: SFXId): void {
     this.log.push(msg);
     if (this.log.length > 200) this.log.shift();
     this.logScroll = Math.max(0, this.log.length - 10);
+    if (sfx) this.sfx.play(sfx);
   }
 }

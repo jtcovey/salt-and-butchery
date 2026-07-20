@@ -203,7 +203,7 @@ export class PartyCreationScene extends Phaser.Scene {
       });
     });
 
-    this.scene.start('WorldMapScene', { party });
+    this.scene.start('CombatScene', { party });
   }
 
   private drawBodySwitch(gfx: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, isType2: boolean): void {

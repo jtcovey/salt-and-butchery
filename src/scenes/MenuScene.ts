@@ -8,6 +8,7 @@ export class MenuScene extends Phaser.Scene {
   private subtitleText!: Phaser.GameObjects.Text;
   private startBtn!: UIButton;
   private optionsBtn!: UIButton;
+  private creditText!: Phaser.GameObjects.Text;
 
   constructor() { super({ key: 'MenuScene' }); }
 
@@ -35,6 +36,10 @@ export class MenuScene extends Phaser.Scene {
       onClick: () => this.scene.start('OptionsScene', { returnTo: 'MenuScene' }),
     });
 
+    this.creditText = this.add.text(0, 0, 'SFX from freesound.org', {
+      fontSize: '12px', color: '#ffffff', fontFamily: 'monospace',
+    }).setOrigin(0, 1);
+
     this.scale.on('resize', () => this.reflow());
     this.reflow();
   }
@@ -55,5 +60,8 @@ export class MenuScene extends Phaser.Scene {
     this.startBtn.resize(btnW, btnH, fontSize);
     this.optionsBtn.setPosition(cx, cy + this.coords.canvasHeight * 0.22);
     this.optionsBtn.resize(btnW, btnH, fontSize);
+
+    this.creditText.setPosition(8, this.coords.canvasHeight - 8)
+      .setFontSize(this.coords.fontSize(0.014));
   }
 }
