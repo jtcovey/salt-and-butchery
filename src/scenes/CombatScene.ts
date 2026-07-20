@@ -68,6 +68,7 @@ export class CombatScene extends Phaser.Scene {
   private moveInfoText!: Phaser.GameObjects.Text;
   private undoBtn!: UIButton;
   private optionsBtn!: UIButton;
+  private inventoryBtn!: UIButton;
 
   constructor() { super({ key: 'CombatScene' }); }
 
@@ -237,6 +238,15 @@ export class CombatScene extends Phaser.Scene {
     });
     this.undoBtn.setDepth(10).setVisible(false);
 
+    this.inventoryBtn = new UIButton(this, 0, 0, {
+      text: 'INVENTORY', width: 160, height: 32, fontSize: 11,
+      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
+      borderColor: 0x334466, borderHoverColor: 0x5588cc,
+      textColor: '#aabbff', textHoverColor: '#ffffff',
+      onClick: () => this.openInventory(),
+    });
+    this.inventoryBtn.setDepth(10);
+
     this.optionsBtn = new UIButton(this, 0, 0, {
       text: 'O', width: 32, height: 32, fontSize: 14,
       bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
@@ -278,6 +288,7 @@ export class CombatScene extends Phaser.Scene {
       GameOptions.showGrid = !GameOptions.showGrid;
       this.redraw();
     });
+    this.input.keyboard!.on('keydown-I', () => this.openInventory());
     this.scale.on('resize', () => this.redraw());
 
     // Log scrolling via mouse wheel over the panel
@@ -855,11 +866,17 @@ export class CombatScene extends Phaser.Scene {
       this.undoBtn.setVisible(false);
     }
 
-    // Options button — top right of game area
+    // Top-right buttons: [INVENTORY] [O]
     const s = this.coords.scale;
     const oBtnSize = Math.round(s * 1.6);
-    this.optionsBtn.setPosition(topBar.x + topBar.w - oBtnSize / 2 - 4, topBar.h / 2);
+    const oBtnX = topBar.x + topBar.w - oBtnSize / 2 - 4;
+    this.optionsBtn.setPosition(oBtnX, topBar.h / 2);
     this.optionsBtn.resize(oBtnSize, oBtnSize, this.coords.fontSize(0.025));
+
+    const invBtnW = Math.round(oBtnSize * 5);
+    const invBtnX = oBtnX - oBtnSize / 2 - invBtnW / 2 - 4;
+    this.inventoryBtn.setPosition(invBtnX, topBar.h / 2);
+    this.inventoryBtn.resize(invBtnW, oBtnSize, this.coords.fontSize(0.02));
 
     this.drawLog();
   }
@@ -932,6 +949,11 @@ export class CombatScene extends Phaser.Scene {
 
   private openOptions(): void {
     this.scene.launch('OptionsScene', { returnTo: 'CombatScene', overlay: true });
+    this.scene.pause();
+  }
+
+  private openInventory(): void {
+    this.scene.launch('InventoryScene', { returnTo: 'CombatScene', overlay: true, party: this.party });
     this.scene.pause();
   }
 
