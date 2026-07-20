@@ -200,7 +200,7 @@ export class PartyCreationScene extends Phaser.Scene {
         hp: CLASS_BASE_HP[def.charClass], maxHp: CLASS_BASE_HP[def.charClass],
         ac: 4, stamina: 1, maxStamina: 1, skills,
         x: 8, y: 8 + i * 5, radius: UNIT_RADIUS,
-        color: CLASS_COLOR[def.charClass], weaponDamage: 1,
+        color: CLASS_COLOR[def.charClass],
       });
 
       if (def.charClass === 'thief') {

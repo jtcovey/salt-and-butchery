@@ -21,7 +21,7 @@ export class PC extends Character {
     hp: number; maxHp: number; ac: number;
     stamina: number; maxStamina: number; skills: CharacterSkills;
     x: number; y: number; radius: number;
-    color: number; weaponDamage: number;
+    color: number;
   }) {
     super(init);
     this.charClass = init.charClass;

@@ -135,7 +135,6 @@ export class CombatScene extends Phaser.Scene {
         hp: 1, maxHp: 1, ac: 3, strength: 0,
         x: s.x, y: s.y, radius: UNIT_RADIUS,
         color: isArcher ? 0xcc4488 : 0xcc6622,
-        weaponDamage: 1,
         label: isArcher ? 'A' : undefined,
       });
       e.inventory.items.push(isArcher ? BOW : SWORD);
@@ -170,7 +169,7 @@ export class CombatScene extends Phaser.Scene {
         hp: d.cls === 'warrior' ? 2 : 1, maxHp: d.cls === 'warrior' ? 2 : 1,
         ac: 4, stamina: 1, maxStamina: 1,
         skills: { strength: d.cls === 'warrior' ? 1 : 0, dexterity: d.cls === 'thief' ? 1 : 0, intelligence: d.cls === 'sorcerer' ? 1 : 0, wisdom: d.cls === 'cleric' ? 1 : 0 },
-        x: d.x, y: d.y, radius: UNIT_RADIUS, color: colors[d.cls], weaponDamage: 1,
+        x: d.x, y: d.y, radius: UNIT_RADIUS, color: colors[d.cls],
       });
       pc.inventory.items.push(d.cls === 'thief' ? BOW : SWORD);
       return pc;
@@ -183,12 +182,12 @@ export class CombatScene extends Phaser.Scene {
     let idx = 0;
     this.enemies = [
       ...melee.map(([x, y, name]) => {
-        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc6622, weaponDamage: 1 });
+        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc6622 });
         e.inventory.items.push(SWORD);
         return e;
       }),
       ...archers.map(([x, y, name]) => {
-        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc4488, weaponDamage: 1, label: 'A' });
+        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc4488, label: 'A' });
         e.inventory.items.push(BOW);
         return e;
       }),

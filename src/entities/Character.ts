@@ -12,16 +12,19 @@ export abstract class Character implements Combatant {
   y: number;
   radius: number;
   facing: number;
-  weaponDamage: number;
   status: StatusEffect[] = [];
   dead = false;
   wardStacks = 0;
   inventory = new Inventory();
 
+  get weaponDamage(): number {
+    return this.inventory.weaponDamage();
+  }
+
   constructor(init: {
     id: string; name: string; hp: number; maxHp: number;
     ac: number; x: number; y: number; radius: number;
-    weaponDamage: number; facing?: number;
+    facing?: number;
   }) {
     this.id = init.id;
     this.name = init.name;
@@ -31,7 +34,6 @@ export abstract class Character implements Combatant {
     this.x = init.x;
     this.y = init.y;
     this.radius = init.radius;
-    this.weaponDamage = init.weaponDamage;
     this.facing = init.facing ?? 0;
   }
 

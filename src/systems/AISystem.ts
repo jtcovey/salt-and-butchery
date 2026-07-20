@@ -59,7 +59,7 @@ export class AISystem {
         const dest = this.moveToward(enemy, nearest, MOVE_PER_STAMINA, obstacles);
         if (dest) {
           actions.push({ type: 'move', destination: dest });
-          const movedEnemy = { ...enemy, x: dest.x, y: dest.y };
+          const movedEnemy = { ...enemy, x: dest.x, y: dest.y, weaponDamage: enemy.weaponDamage };
           if (this.movement.isAdjacent(movedEnemy, nearest)) {
             actions.push({ type: 'attack', target: nearest });
           }
