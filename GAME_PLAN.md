@@ -37,6 +37,7 @@ Circle-based free movement (not grid-based):
 - Two-tier range display: green (free) inner circle, amber (stamina-paid) outer ring
 - `ADJACENT_TOLERANCE = 0.5` units for melee range checks
 - `UNIT_RADIUS = 0.6`, `MELEE_RANGE = 1.7` (2×radius + tolerance)
+- **Collision detection**: ray-vs-circle intersection math stops movement at first blocking circle (other PCs, enemies, downed bodies, obstacles). Clicking toward a character moves up to touching distance. Only tests circles along the movement line, not all on the map.
 - Undo move button — reverts position, stamina, and movement state (invalidated if action taken after move)
 
 ### Combat System
@@ -76,13 +77,27 @@ Each action has: `id`, `label`, `range`, `target`, optional `numericRange`, opti
 - **RangeIndicator** (`src/ui/RangeIndicator.ts`): draws circles (move, attack, heal) and cones (frenzy) via Phaser Graphics.
 - **Combat log**: scrollable text in side panel with scrollbar, mouse wheel scrolling, auto-scroll to bottom. Reports all actions with stamina costs, roll details, move distances.
 
+### Turn System
+- **Free selection**: during player phase, click any active (non-beaten, non-done) PC to switch control freely
+- **Per-PC end turn**: "END {NAME}'S TURN" button marks one PC as done (checkmark + dimmed in top bar). Enemy phase auto-starts when all PCs are done.
+- PC selection requires clicking **inside** the circle (distance ≤ radius), not the tolerance zone — prevents accidental selection when moving near allies
+- Auto End Turn option: when enabled, auto-ends a PC's turn once they've acted and hit 0 stamina
+
+### Options System (`src/config/GameOptions.ts`)
+Global options singleton, toggled from OptionsScene:
+- **God Mode** (off by default): heroes take no HP damage when hit
+- **Auto End Turn** (off by default): auto-ends PC turn after action + 0 stamina
+
 ### Scene Flow
 ```
 BootScene → MenuScene → PartyCreationScene → WorldMapScene → CombatScene
+                ↓
+          OptionsScene
                                                           ↔ InventoryScene
 ```
 
 - **PartyCreationScene**: 4 enabled slots by default (Ragnar/warrior, Skiv/thief, Aldric/sorcerer, S.Mara/cleric). Each slot is self-contained with name input, 2×2 class buttons, body type toggle. Slots 5-6 can be enabled by clicking. Max 1 sorcerer, max 1 cleric enforced.
+- **OptionsScene**: toggle buttons for God Mode and Auto End Turn. Reachable from main menu; `returnTo` param allows future access from pause/combat.
 - **CombatScene**: wires all systems together. Modes: select → move → targeting. Default encounter: 4 PCs vs 3 melee + 2 archer skeletons.
 
 ### Key Files
@@ -94,9 +109,11 @@ BootScene → MenuScene → PartyCreationScene → WorldMapScene → CombatScene
 - `src/systems/TurnSystem.ts` — turn order, phase management, status cleanup
 - `src/systems/AISystem.ts` — enemy decision-making
 - `src/entities/` — Character, PC, NPC, Inventory
+- `src/config/GameOptions.ts` — global options (godMode, autoEndTurn)
 - `src/actions/` — Action interface, classActions definitions
 - `src/render/` — TerrainRenderer, UnitRenderer
 - `src/ui/` — UIButton, RangeIndicator
+- `src/scenes/OptionsScene.ts` — options toggle UI
 
 ### Design Constraints
 - `erasableSyntaxOnly: true` — no TypeScript enums, use string unions
