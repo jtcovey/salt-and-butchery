@@ -385,6 +385,14 @@ so walking out puts the party back exactly where they left.
 **Leaving.** Stepping onto *any walkable edge tile* exits — no exit marker needed. Town
 maps just need an open border where you want people to be able to walk out.
 
+Because of that rule, **pathfinding in town treats the border as a wall except for the
+destination tile** (`travelGrid()`). A route is allowed to *end* on the border, never to
+travel along it. Without that, clicking a spot on the far side of town could route through
+the border ring and eject the party thirty tiles short of where they were going — which is
+exactly what happened the first time this was tested on the real map. A side effect worth
+knowing: a border tile with no walkable non-border neighbour is now genuinely unreachable
+and reports "No route there", rather than being "reached" by walking you out of town.
+
 The party lands on the world map tile *beyond* the town, in whichever direction they
 walked out — `exitDirection()` reads that off which edge was crossed, and corners leave
 diagonally. Landing back on the town itself meant stepping off and on again to re-enter,
@@ -541,24 +549,36 @@ Saved by the editor in World Map mode. Distinguished from encounters by `"kind":
 ## Where this was left off (2026-07-25, `feature/world-map`)
 
 Notes for whoever picks this up next — including a fresh Claude with none of the session
-context. Everything below typechecks and builds; **none of it has been seen running.**
+context.
 
-**What was not verified.** The Chrome extension couldn't reach the dev server for this
-whole stretch, so every UI claim in this document is reasoned from the code, not observed.
-Map connectivity and layout maths *were* verified, by running the real functions over the
-real map files in node — that's why those numbers are quoted specifically. Treat "builds
-clean" and "works" as different claims.
+**Verified running in Chrome** against the dev server: party creation with live sprite
+preview, world map travel, entering the town, the draggable panel, walking up to an NPC
+and talking, closing a dialog without the party moving, and leaving town by the south
+edge (landing south of it on the world map). Map connectivity and layout maths were
+separately verified by running the real functions over the real map files in node.
 
-**Worth testing first**, in rough order of how likely they are to be wrong:
+Two things were found *only* by running it, both now fixed — worth remembering that
+"typechecks and builds" told us nothing about either:
 
-1. `UIButton` now fires `onClick` on **pointerup** rather than pointerdown. This fixed a
-   click-through bug but touches every button in the game. The D-pad in particular now
-   steps on release — check it doesn't feel sluggish when tapping quickly.
-2. Walking up to a town NPC and talking. The party should stop *beside* them, never on
-   them, and the dialog should open on arrival.
-3. Leaving a town from each edge, including corners.
-4. The draggable control panel — drag by bare panel, buttons still click, position
-   survives a window resize.
+- Clicking a destination on the far side of town routed the party through the border ring,
+  which ejected them from the town thirty tiles short. Fixed by `travelGrid()`.
+- Exiting town appeared to ignore the direction walked. The direction code was correct; the
+  party was leaving via a *different edge* than the one intended, because of the above.
+
+Combat was also checked: the Lost Caravan encounter loads from the world map, party
+sprites render on the field, and `UIButton` still drives the ability panel (ATTACK enters
+targeting and flips to CANCEL ATTACK).
+
+**Open question for B — world map locations trigger when *passed through*, not only when
+they're the destination.** Click a spot north of the town and the route runs over the town
+tile, which pulls the party inside. This is the same shape as the town-border bug and has
+the same fix available (only trigger when the location is the travel destination), but it
+is a design call, not obviously a defect: stumbling into an *encounter* while crossing the
+map may well be wanted, while being dragged into a *town* is just annoying. Nothing has
+been changed here pending that call.
+
+**Still untested:** victory/defeat routing back from an encounter, resizing the window
+mid-game, and the reveal chain (winning the caravan revealing the goblin tracks and nest).
 
 **Deliberate calls a fresh reader might otherwise undo:**
 

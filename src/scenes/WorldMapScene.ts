@@ -244,6 +244,32 @@ export class WorldMapScene extends BaseScene {
     }
   }
 
+  /**
+   * The nav grid with the town border walled off, except for `goal` itself.
+   *
+   * Stepping on any town edge tile leaves the town, so a route is allowed to
+   * *end* on the border but never to travel along it. Without this, a click on
+   * the far side of town could route through the border ring and eject the party
+   * thirty tiles short of where they were going.
+   */
+  private travelGrid(goalCol: number, goalRow: number): number[][] {
+    if (this.mapKind !== 'town') return this.navGrid;
+
+    const grid = this.navGrid.map(row => row.slice());
+    const rows = grid.length;
+    if (rows === 0) return grid;
+    const cols = grid[0].length;
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (!this.isEdgeTile(col, row)) continue;
+        if (col === goalCol && row === goalRow) continue;
+        grid[row][col] = TILE_ROCK;
+      }
+    }
+    return grid;
+  }
+
   /** True when `pos` is on or touching the NPC's tile, diagonals included. */
   private isBesideNpc(npc: WorldLocation, pos: Vec2): boolean {
     return Math.abs(Math.floor(pos.x) - Math.floor(npc.x)) <= 1
@@ -307,7 +333,9 @@ export class WorldMapScene extends BaseScene {
       return;
     }
 
-    const path = findTilePath(this.navGrid, this.partyPos, { x: col + 0.5, y: row + 0.5 });
+    const path = findTilePath(
+      this.travelGrid(col, row), this.partyPos, { x: col + 0.5, y: row + 0.5 },
+    );
     if (!path) {
       this.setStatus('No route there.');
       return;
@@ -361,7 +389,7 @@ export class WorldMapScene extends BaseScene {
         if (this.mapKind === 'town' && this.isEdgeTile(col, row)) continue;
 
         const goal = { x: col + 0.5, y: row + 0.5 };
-        const path = findTilePath(this.navGrid, this.partyPos, goal);
+        const path = findTilePath(this.travelGrid(col, row), this.partyPos, goal);
         if (!path || path.length >= bestLen) continue;
         bestLen = path.length;
         best = goal;
