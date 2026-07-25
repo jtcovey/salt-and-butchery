@@ -34,12 +34,38 @@ const DEFAULTS = {
   disabledBorderColor: 0x1a1a2a,
 };
 
+/**
+ * Shared palettes. Spread into a config rather than retyping the colour block:
+ *   new UIButton(this, x, y, { text: 'BACK', ...BUTTON_BACK, onClick: ... })
+ */
+export const BUTTON_BACK = {
+  bgColor: 0x1a0a0a,
+  hoverColor: 0x2a1414,
+  pressedColor: 0x3a1e1e,
+  borderColor: 0x442222,
+  borderHoverColor: 0x884444,
+  textColor: '#cc8844',
+  textHoverColor: '#ffaa66',
+} as const;
+
+/** Neutral chrome buttons — the INVENTORY / O pair in the top bar. */
+export const BUTTON_CHROME = {
+  bgColor: 0x111128,
+  hoverColor: 0x1a1a44,
+  pressedColor: 0x222266,
+  borderColor: 0x334466,
+  borderHoverColor: 0x5588cc,
+  textColor: '#aabbff',
+  textHoverColor: '#ffffff',
+} as const;
+
 export class UIButton extends Phaser.GameObjects.Container {
   private bg: Phaser.GameObjects.Graphics;
   private label: Phaser.GameObjects.Text;
   private config: Required<Omit<UIButtonConfig, 'onClick'>> & { onClick: () => void };
   private enabled = true;
-  private clickLocked = false;
+  /** Pressed on this button and not yet released or dragged off. */
+  private pressed = false;
   private btnWidth: number;
   private btnHeight: number;
 
@@ -93,20 +119,26 @@ export class UIButton extends Phaser.GameObjects.Container {
     });
     this.on('pointerout', () => {
       if (!this.enabled) return;
-      this.clickLocked = false;
+      this.pressed = false;
       this.drawBg(this.config.bgColor, this.config.borderColor);
       this.label.setColor(this.config.textColor);
     });
     this.on('pointerdown', () => {
-      if (!this.enabled || this.clickLocked) return;
-      this.clickLocked = true;
-      this.drawBg(this.config.pressedColor, this.config.borderHoverColor);
-      this.config.onClick();
-    });
-    this.on('pointerup', () => {
       if (!this.enabled) return;
-      this.clickLocked = false;
+      this.pressed = true;
+      this.drawBg(this.config.pressedColor, this.config.borderHoverColor);
+    });
+    // Fires on release, not press. Two reasons: dragging off a button before
+    // letting go cancels it, the way buttons behave everywhere; and the button is
+    // still visible during pointerdown, so a scene's hitTestPointer click-through
+    // guard can still see it. Acting on press let a button that hides itself —
+    // a dialog's OK — vanish before the scene's own handler ran, and the click
+    // fell through to the map behind it.
+    this.on('pointerup', () => {
+      if (!this.enabled || !this.pressed) return;
+      this.pressed = false;
       this.drawBg(this.config.hoverColor, this.config.borderHoverColor);
+      this.config.onClick();
     });
   }
 

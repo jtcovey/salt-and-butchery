@@ -6,13 +6,25 @@ export const UNIT_RADIUS = 0.6;
 export const MELEE_RANGE = UNIT_RADIUS * 2 + ADJACENT_TOLERANCE;
 export const OBSTACLE_RADIUS = 0.8;
 
+/**
+ * Character sprite width as a multiple of the unit's circle diameter. The circle
+ * is the mechanical footprint; the art overflows it, Pac-Man style.
+ */
+export const SPRITE_SCALE = 1.3;
+
 export const DEFAULT_ARENA_WIDTH = 60;
 export const DEFAULT_ARENA_HEIGHT = 40;
 
+/** Max party size. Matches PartyCreationScene's slot count and the TopBar text pool. */
+export const MAX_PARTY_SLOTS = 6;
+
 export const LAYOUT = {
   topBar:    { x: 0, y: 0, width: 1, height: 0.07 },
+  // Combat: battlefield on the left, action/log panel on the right.
   gameArea:  { x: 0, y: 0.07, width: 0.78, height: 0.93 },
   sidePanel: { x: 0.78, y: 0.07, width: 0.22, height: 0.93 },
+  // World map: no side panel, so the map gets the full width below the top bar.
+  worldArea: { x: 0, y: 0.07, width: 1, height: 0.93 },
 } as const;
 
 export const CLASS_COLOR: Record<string, number> = {

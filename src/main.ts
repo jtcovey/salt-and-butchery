@@ -13,6 +13,9 @@ const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   backgroundColor: '#0a0a14',
   roundPixels: true,
+  // Character art is authored at its display size (30x36). Nearest-neighbour
+  // keeps it crisp when the arena scales up instead of blurring it.
+  pixelArt: true,
   scale: {
     mode: Phaser.Scale.RESIZE,
     parent: 'game-container',

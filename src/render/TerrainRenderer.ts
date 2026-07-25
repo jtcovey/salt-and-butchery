@@ -1,11 +1,7 @@
 import type { Obstacle } from '../types';
 import type { CoordinateSystem } from '../core/CoordinateSystem';
 import { GameOptions } from '../config/GameOptions';
-
-const TILE_COLORS: Record<number, number> = {
-  0: 0x2a5a2a, // grass
-  1: 0x4a4a4a, // rock
-};
+import { tileProps } from '../config/terrain';
 
 export type TileOverlay = 'blood' | 'salt';
 
@@ -51,7 +47,7 @@ export class TerrainRenderer {
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const tileId = terrainGrid[r][c];
-          const color = TILE_COLORS[tileId] ?? TILE_COLORS[0];
+          const color = tileProps(tileId).color;
           const pos = this.coords.worldToScreen(c, r);
           this.gfx.fillStyle(color);
           this.gfx.fillRect(pos.x, pos.y, s, s);

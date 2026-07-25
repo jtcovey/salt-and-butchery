@@ -1,5 +1,7 @@
 import type { Combatant, Vec2 } from '../types';
 import { MOVE_PER_STAMINA, FREE_MOVE, ADJACENT_TOLERANCE } from '../config/constants';
+import { isTileIdPassable, doesTileIdBlockLOS } from '../config/terrain';
+import { findTilePath } from '../core/Pathfinding';
 
 export class MovementSystem {
   private terrainGrid: number[][] | null = null;
@@ -14,7 +16,7 @@ export class MovementSystem {
     const row = Math.floor(y);
     if (row < 0 || row >= this.terrainGrid.length) return false;
     if (col < 0 || col >= this.terrainGrid[0].length) return false;
-    return this.terrainGrid[row][col] === 0;
+    return isTileIdPassable(this.terrainGrid[row][col]);
   }
 
   hasLineOfSight(from: Vec2, to: Vec2): boolean {
@@ -58,7 +60,7 @@ export class MovementSystem {
       if (row < 0 || row >= this.terrainGrid.length ||
           col < 0 || col >= this.terrainGrid[0].length) return false;
 
-      if (this.terrainGrid[row][col] === 1) return false;
+      if (doesTileIdBlockLOS(this.terrainGrid[row][col])) return false;
     }
 
     return true;
@@ -236,80 +238,28 @@ export class MovementSystem {
     return t;
   }
 
+  /**
+   * How far along the path toward `goal` this unit can actually get on `maxDist`
+   * of movement. Returns the furthest reachable tile centre, or null if it can't
+   * even manage the first step.
+   */
   findGridPath(start: Vec2, goal: Vec2, maxDist: number): Vec2 | null {
     if (!this.terrainGrid) return goal;
-
-    const startCol = Math.floor(start.x);
-    const startRow = Math.floor(start.y);
-    const goalCol = Math.floor(goal.x);
-    const goalRow = Math.floor(goal.y);
-
-    if (startCol === goalCol && startRow === goalRow) return goal;
-
-    const rows = this.terrainGrid.length;
-    const cols = this.terrainGrid[0].length;
-
-    const key = (c: number, r: number) => r * cols + c;
-    const gScore = new Map<number, number>();
-    const fScore = new Map<number, number>();
-    const cameFrom = new Map<number, number>();
-    const open: Array<{ col: number; row: number }> = [];
-
-    const h = (c: number, r: number) => Math.abs(c - goalCol) + Math.abs(r - goalRow);
-
-    const sk = key(startCol, startRow);
-    gScore.set(sk, 0);
-    fScore.set(sk, h(startCol, startRow));
-    open.push({ col: startCol, row: startRow });
-
-    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-
-    let iterations = 0;
-    while (open.length > 0 && iterations < 2000) {
-      iterations++;
-      open.sort((a, b) => (fScore.get(key(a.col, a.row)) ?? Infinity) - (fScore.get(key(b.col, b.row)) ?? Infinity));
-      const current = open.shift()!;
-      const ck = key(current.col, current.row);
-
-      if (current.col === goalCol && current.row === goalRow) {
-        const path: Array<{ col: number; row: number }> = [];
-        let k = ck;
-        while (k !== sk) {
-          path.unshift({ col: k % cols, row: Math.floor(k / cols) });
-          k = cameFrom.get(k)!;
-        }
-
-        let totalDist = 0;
-        let prev = start;
-        for (const step of path) {
-          const wp = { x: step.col + 0.5, y: step.row + 0.5 };
-          totalDist += this.distance(prev, wp);
-          if (totalDist > maxDist) return prev === start ? null : prev;
-          prev = wp;
-        }
-        return prev;
-      }
-
-      for (const [dc, dr] of dirs) {
-        const nc = current.col + dc;
-        const nr = current.row + dr;
-        if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
-        if (this.terrainGrid![nr][nc] !== 0) continue;
-
-        const nk = key(nc, nr);
-        const tentG = (gScore.get(ck) ?? Infinity) + 1;
-        if (tentG < (gScore.get(nk) ?? Infinity)) {
-          cameFrom.set(nk, ck);
-          gScore.set(nk, tentG);
-          fScore.set(nk, tentG + h(nc, nr));
-          if (!open.some(o => o.col === nc && o.row === nr)) {
-            open.push({ col: nc, row: nr });
-          }
-        }
-      }
+    if (Math.floor(start.x) === Math.floor(goal.x) && Math.floor(start.y) === Math.floor(goal.y)) {
+      return goal;
     }
 
-    return null;
+    const path = findTilePath(this.terrainGrid, start, goal);
+    if (!path || path.length === 0) return null;
+
+    let totalDist = 0;
+    let prev = start;
+    for (const wp of path) {
+      totalDist += this.distance(prev, wp);
+      if (totalDist > maxDist) return prev === start ? null : prev;
+      prev = wp;
+    }
+    return prev;
   }
 
   facingFrom(from: Vec2, to: Vec2): number {

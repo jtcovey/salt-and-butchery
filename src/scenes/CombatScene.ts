@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import type { EncounterData, Obstacle, GamePhase } from '../types';
+import type { Obstacle, GamePhase, CombatReturn } from '../types';
+import { WorldState } from '../core/WorldState';
 import type { Action } from '../actions/Action';
 import { CoordinateSystem } from '../core/CoordinateSystem';
 import { MovementSystem } from '../systems/MovementSystem';
@@ -11,7 +12,8 @@ import type { TileOverlay, SaltBody } from '../render/TerrainRenderer';
 import { UnitRenderer } from '../render/UnitRenderer';
 import { VFXRenderer } from '../render/VFXRenderer';
 import { RangeIndicator } from '../ui/RangeIndicator';
-import { UIButton } from '../ui/UIButton';
+import { UIButton, BUTTON_BACK, BUTTON_CHROME } from '../ui/UIButton';
+import { TopBar } from '../ui/TopBar';
 import { PC } from '../entities/PC';
 import { NPC } from '../entities/NPC';
 import { LAYOUT, UNIT_RADIUS, RANGED_RANGE, MELEE_RANGE } from '../config/constants';
@@ -19,10 +21,13 @@ import { GameOptions } from '../config/GameOptions';
 import { SWORD, BOW } from '../data/items';
 import { SFXSystem } from '../systems/SFXSystem';
 import type { SFXId } from '../systems/SFXSystem';
+import { BaseScene } from './BaseScene';
 
 type CombatMode = 'select' | 'move' | 'targeting';
 
-export class CombatScene extends Phaser.Scene {
+const DEFAULT_LEVEL = 'levels/TestMap1.json';
+
+export class CombatScene extends BaseScene {
   private coords!: CoordinateSystem;
   private movement!: MovementSystem;
   private combat!: CombatSystem;
@@ -49,6 +54,9 @@ export class CombatScene extends Phaser.Scene {
   private log: string[] = [];
   private logScroll = 0;
   private animating = false;
+  /** False until loadLevel resolves and finishSetup wires TurnSystem/AISystem. */
+  private ready = false;
+  private levelFile = DEFAULT_LEVEL;
 
   // Undo state
   private undoSnapshot: {
@@ -59,23 +67,37 @@ export class CombatScene extends Phaser.Scene {
   } | null = null;
 
   // UI elements
+  private topBar!: TopBar;
   private panelGfx!: Phaser.GameObjects.Graphics;
-  private topBarGfx!: Phaser.GameObjects.Graphics;
   private phaseText!: Phaser.GameObjects.Text;
   private logText!: Phaser.GameObjects.Text;
   private logMask!: Phaser.GameObjects.Graphics;
-  private hpTexts: Phaser.GameObjects.Text[] = [];
   private actionBtns: UIButton[] = [];
   private endTurnBtn!: UIButton;
   private moveInfoText!: Phaser.GameObjects.Text;
   private undoBtn!: UIButton;
-  private optionsBtn!: UIButton;
-  private inventoryBtn!: UIButton;
+
+  // End-of-combat overlay (victory or defeat) — kept for re-layout on resize
+  private endGfx: Phaser.GameObjects.Graphics | null = null;
+  private endText: Phaser.GameObjects.Text | null = null;
+  private endBtn: UIButton | null = null;
+
+  /** Location id this encounter belongs to; marked complete on victory. */
+  private encounterId: string | null = null;
+  private returnTo: CombatReturn = { scene: 'MenuScene' };
 
   constructor() { super({ key: 'CombatScene' }); }
 
-  init(data?: { encounter?: EncounterData; party?: PC[] }) {
+  init(data?: {
+    party?: PC[];
+    levelFile?: string;
+    encounterId?: string;
+    returnTo?: CombatReturn;
+  }) {
     if (data?.party) this.party = data.party;
+    this.levelFile = data?.levelFile ?? DEFAULT_LEVEL;
+    this.encounterId = data?.encounterId ?? null;
+    this.returnTo = data?.returnTo ?? { scene: 'MenuScene' };
   }
 
   create() {
@@ -92,10 +114,14 @@ export class CombatScene extends Phaser.Scene {
 
     this.buildUI();
     this.setupInput();
+    this.watchReflow();
 
-    this.events.on('resume', () => this.redraw());
+    this.loadLevel(this.levelFile);
+  }
 
-    this.loadLevel('levels/TestMap1.json');
+  protected override reflow(): void {
+    this.redraw();
+    this.layoutEndOverlay();
   }
 
   private async loadLevel(path: string): Promise<void> {
@@ -106,6 +132,10 @@ export class CombatScene extends Phaser.Scene {
       if (data.terrainGrid) {
         this.terrainGrid = data.terrainGrid;
         this.movement.setTerrainGrid(data.terrainGrid);
+        // Size the arena to the actual grid rather than leaving it at the 60x40 default.
+        if (data.terrainGrid.length > 0) {
+          this.coords.setArena(data.terrainGrid[0].length, data.terrainGrid.length);
+        }
       }
 
       if (data.partySpawn && this.party.length > 0) {
@@ -155,6 +185,7 @@ export class CombatScene extends Phaser.Scene {
     this.turns.beginPlayerTurn();
     this.logMsg(`—— Turn 1: Player Phase ——`);
     this.mode = 'move';
+    this.ready = true;
     this.redraw();
   }
 
@@ -198,24 +229,25 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private buildUI(): void {
-    this.topBarGfx = this.add.graphics().setDepth(8);
+    this.topBar = new TopBar(this, this.coords, {
+      party: this.party,
+      onOptions: () => this.openOptions(),
+      onInventory: () => this.openInventory(),
+      // Combat's only additions to the shared bar: the turn-done tick and dimming.
+      decoratePC: (pc) => pc.turnDone ? { suffix: ' ✓', alpha: 0.4 } : {},
+    });
+
     this.panelGfx = this.add.graphics().setDepth(8);
     this.phaseText = this.add.text(0, 0, '', { fontSize: '14px', color: '#ffffff' }).setDepth(9);
     this.logText = this.add.text(0, 0, '', { fontSize: '10px', color: '#bbbbbb', wordWrap: { width: 200 } }).setDepth(9);
     this.logMask = this.add.graphics().setDepth(9);
     this.moveInfoText = this.add.text(0, 0, '', { fontSize: '10px', color: '#66aa77' }).setDepth(9);
 
-    for (let i = 0; i < 6; i++) {
-      this.hpTexts.push(this.add.text(0, 0, '', { fontSize: '10px', color: '#ccc' }).setDepth(9));
-    }
-
     for (let i = 0; i < 5; i++) {
       const idx = i;
       const btn = new UIButton(this, 0, 0, {
         text: '', width: 110, height: 26, fontSize: 11,
-        bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-        borderColor: 0x334466, borderHoverColor: 0x5588cc,
-        textColor: '#aabbff', textHoverColor: '#ffffff',
+        ...BUTTON_CHROME,
         onClick: () => this.handleActionButton(idx),
       });
       btn.setDepth(10).setVisible(false);
@@ -224,9 +256,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.endTurnBtn = new UIButton(this, 0, 0, {
       text: 'END TURN', width: 110, height: 28, fontSize: 11,
-      bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
-      borderColor: 0x442222, borderHoverColor: 0x884444,
-      textColor: '#cc8844', textHoverColor: '#ffaa66',
+      ...BUTTON_BACK,
       onClick: () => this.endCurrentTurn(),
     });
     this.endTurnBtn.setDepth(10);
@@ -239,29 +269,14 @@ export class CombatScene extends Phaser.Scene {
       onClick: () => this.undoMove(),
     });
     this.undoBtn.setDepth(10).setVisible(false);
-
-    this.inventoryBtn = new UIButton(this, 0, 0, {
-      text: 'INVENTORY', width: 160, height: 32, fontSize: 11,
-      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-      borderColor: 0x334466, borderHoverColor: 0x5588cc,
-      textColor: '#aabbff', textHoverColor: '#ffffff',
-      onClick: () => this.openInventory(),
-    });
-    this.inventoryBtn.setDepth(10);
-
-    this.optionsBtn = new UIButton(this, 0, 0, {
-      text: 'O', width: 32, height: 32, fontSize: 14,
-      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-      borderColor: 0x334466, borderHoverColor: 0x5588cc,
-      textColor: '#aabbff', textHoverColor: '#ffffff',
-      onClick: () => this.openOptions(),
-    });
-    this.optionsBtn.setDepth(10);
   }
 
   private setupInput(): void {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.animating || this.turns.phase !== 'player') return;
+      if (!this.ready || this.animating || this.turns.phase !== 'player') return;
+      // Buttons don't stop propagation; without this a click on one would also
+      // fall through to the battlefield. Currently safe by geometry alone.
+      if (this.input.hitTestPointer(pointer).length > 0) return;
       const worldPos = this.coords.screenToWorld(pointer.x, pointer.y);
       const inGame = this.coords.isInGameArea(pointer.x, pointer.y);
       if (!inGame) return;
@@ -277,6 +292,7 @@ export class CombatScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (!this.ready) return;
       if (this.mode !== 'targeting' || !this.activeAction || this.activeAction.target !== 'cone') return;
       const pc = this.turns.selectedPC;
       if (!pc) return;
@@ -291,7 +307,6 @@ export class CombatScene extends Phaser.Scene {
       this.redraw();
     });
     this.input.keyboard!.on('keydown-I', () => this.openInventory());
-    this.scale.on('resize', () => this.redraw());
 
     // Log scrolling via mouse wheel over the panel
     this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _dx: number, _dy: number, dz: number) => {
@@ -302,7 +317,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private endCurrentTurn(): void {
-    if (this.animating || this.turns.phase !== 'player') return;
+    if (!this.ready || this.animating || this.turns.phase !== 'player') return;
     const pc = this.turns.selectedPC;
     if (!pc || pc.turnDone) return;
     this.logMsg(`${pc.name} ends turn.`);
@@ -536,7 +551,7 @@ export class CombatScene extends Phaser.Scene {
       }
     }
 
-    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.onVictory(); return; }
     this.mode = 'move';
     this.activeAction = null;
     this.checkAutoEndTurn(pc);
@@ -582,7 +597,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.attacksRemaining--;
 
-    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.onVictory(); return; }
 
     if (this.attacksRemaining > 0 && this.enemies.length > 0) {
       this.logMsg(`  (${this.attacksRemaining} shot${this.attacksRemaining > 1 ? 's' : ''} remaining)`);
@@ -755,6 +770,9 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private redraw(): void {
+    // TurnSystem doesn't exist until finishSetup; a resize mid-load would throw.
+    if (!this.ready) return;
+
     this.terrain.draw(this.obstacles, this.terrainGrid ?? undefined, this.tileOverlays, this.saltBodies);
     this.unitRenderer.draw(this.party, this.enemies, this.turns.selectedPC?.id ?? null);
 
@@ -781,33 +799,24 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private drawUI(): void {
+    this.topBar.layout();
+    this.drawSidePanel();
+    this.drawLog();
+  }
+
+  /**
+   * Height of one action button. Shared with drawLog() so the log's top edge
+   * lands flush under the button stack — these were computed independently
+   * from different bases and disagreed.
+   */
+  private actionButtonHeight(): number {
+    return Math.max(22, this.coords.canvasHeight * 0.032);
+  }
+
+  private drawSidePanel(): void {
     const h = this.coords.canvasHeight;
-    const w = this.coords.canvasWidth;
-    const topBar = this.coords.regionPixels(LAYOUT.topBar);
     const panel = this.coords.regionPixels(LAYOUT.sidePanel);
 
-    // Top bar
-    this.topBarGfx.clear();
-    this.topBarGfx.fillStyle(0x080814, 0.95);
-    this.topBarGfx.fillRect(topBar.x, topBar.y, topBar.w, topBar.h);
-    this.topBarGfx.lineStyle(1, 0x334466);
-    this.topBarGfx.lineBetween(0, topBar.h, w, topBar.h);
-
-    // Party HP in top bar
-    this.party.forEach((c, i) => {
-      if (!this.hpTexts[i]) return;
-      const colHex = '#' + c.color.toString(16).padStart(6, '0');
-      const fontSize = this.coords.fontSize(0.018);
-      const doneMarker = c.turnDone && !c.dead && !c.status.includes('beaten') ? ' ✓' : '';
-      this.hpTexts[i].setPosition(topBar.x + 12 + i * (topBar.w / 6), topBar.h / 2)
-        .setOrigin(0, 0.5)
-        .setText(`${c.name} ${c.hp}/${c.maxHp}${doneMarker}`)
-        .setColor(colHex)
-        .setFontSize(fontSize)
-        .setAlpha(c.dead ? 0.3 : c.status.includes('beaten') ? 0.5 : c.turnDone ? 0.4 : 1);
-    });
-
-    // Side panel
     this.panelGfx.clear();
     this.panelGfx.fillStyle(0x080814, 0.95);
     this.panelGfx.fillRect(panel.x, panel.y, panel.w, panel.h);
@@ -833,7 +842,7 @@ export class CombatScene extends Phaser.Scene {
     // Action buttons
     const actions = pc ? pc.availableActions({ party: this.party, enemies: this.enemies, obstacles: this.obstacles }) : [];
     const btnW = Math.max(90, panel.w * 0.85);
-    const btnH = Math.max(22, h * 0.032);
+    const btnH = this.actionButtonHeight();
     const btnFontSize = this.coords.fontSize(0.015);
     const btnStartY = panel.y + h * 0.09 + btnH * 0.5;
     const btnGap = btnH + 4;
@@ -873,25 +882,11 @@ export class CombatScene extends Phaser.Scene {
       this.undoBtn.setVisible(false);
     }
 
-    // Top-right buttons: [INVENTORY] [O]
-    const s = this.coords.scale;
-    const oBtnSize = Math.round(s * 1.6);
-    const oBtnX = Math.round(topBar.x + topBar.w - oBtnSize / 2 - 4);
-    const oBtnY = Math.round(topBar.h / 2);
-    this.optionsBtn.setPosition(oBtnX, oBtnY);
-    this.optionsBtn.resize(oBtnSize, oBtnSize, this.coords.fontSize(0.025));
-
-    const invBtnW = Math.round(oBtnSize * 5);
-    const invBtnX = Math.round(oBtnX - oBtnSize / 2 - invBtnW / 2 - 4);
-    this.inventoryBtn.setPosition(invBtnX, oBtnY);
-    this.inventoryBtn.resize(invBtnW, oBtnSize, this.coords.fontSize(0.02));
-
-    this.drawLog();
   }
 
   private drawLog(): void {
     const panel = this.coords.regionPixels(LAYOUT.sidePanel);
-    const btnH = Math.max(22, panel.h * 0.032);
+    const btnH = this.actionButtonHeight();
     const logTop = panel.y + panel.h * 0.45 + btnH * 0.7;
     const logH = panel.h * 0.53;
     const fontSize = this.coords.fontSize(0.013);
@@ -956,12 +951,12 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private openOptions(): void {
-    this.scene.launch('OptionsScene', { returnTo: 'CombatScene', overlay: true });
+    this.scene.launch('OptionsScene', { returnTo: this.scene.key, overlay: true });
     this.scene.pause();
   }
 
   private openInventory(): void {
-    this.scene.launch('InventoryScene', { returnTo: 'CombatScene', overlay: true, party: this.party });
+    this.scene.launch('InventoryScene', { returnTo: this.scene.key, overlay: true, party: this.party });
     this.scene.pause();
   }
 
@@ -973,30 +968,88 @@ export class CombatScene extends Phaser.Scene {
     return 0;
   }
 
+  /** Single victory path — reached from every kill that empties the field. */
+  private onVictory(): void {
+    if (this.encounterId) WorldState.markComplete(this.encounterId);
+    const dur = this.logMsg('★ VICTORY ★', 'victory');
+    this.mode = 'select';
+    this.activeAction = null;
+    this.redraw();
+    this.time.delayedCall(Math.max(dur, 500), () => this.showVictoryOverlay());
+  }
+
   private showDefeatOverlay(): void {
-    const w = this.coords.canvasWidth;
-    const h = this.coords.canvasHeight;
+    this.showEndOverlay('DEFEATED', '#aa2222', 'ACCEPT DEATH', () => {
+      this.scene.start('MenuScene');
+    });
+  }
 
-    const overlay = this.add.graphics().setDepth(50);
-    overlay.fillStyle(0x000000, 0.85);
-    overlay.fillRect(0, 0, w, h);
+  private showVictoryOverlay(): void {
+    this.showEndOverlay('★ VICTORY ★', '#ddcc44', 'BACK 2 WORLD', () => this.leaveCombat());
+  }
 
-    this.add.text(w / 2, h * 0.35, 'DEFEATED', {
-      fontSize: `${this.coords.fontSize(0.08)}px`,
-      color: '#aa2222',
+  /**
+   * Hand the party back to wherever this encounter came from. Defaults to the
+   * world map tile that triggered it; `returnTo` can override the destination.
+   */
+  private leaveCombat(): void {
+    const dest = this.returnTo;
+    if (dest.scene === 'WorldMapScene') {
+      if (dest.mapFile) WorldState.mapFile = dest.mapFile;
+      if (dest.tile) WorldState.partyTile = { x: dest.tile.x, y: dest.tile.y };
+      this.scene.start('WorldMapScene', { party: this.party, mapFile: WorldState.mapFile });
+    } else {
+      this.scene.start(dest.scene, { party: this.party });
+    }
+  }
+
+  /** Victory and defeat differ only in wording and colour. */
+  private showEndOverlay(
+    title: string,
+    titleColor: string,
+    buttonText: string,
+    onClick: () => void,
+  ): void {
+    this.endGfx = this.add.graphics().setDepth(50);
+
+    this.endText = this.add.text(0, 0, title, {
+      color: titleColor,
       fontStyle: 'bold',
       fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(51);
 
-    const btnW = Math.max(200, w * 0.2);
-    const btnH = Math.max(40, h * 0.06);
-    const btn = new UIButton(this, w / 2, h * 0.55, {
-      text: 'ACCEPT DEATH', width: btnW, height: btnH, fontSize: this.coords.fontSize(0.025),
+    this.endBtn = new UIButton(this, 0, 0, {
+      text: buttonText,
       bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
       borderColor: 0x662222, borderHoverColor: 0xaa4444,
       textColor: '#cc6644', textHoverColor: '#ffaa66',
-      onClick: () => this.scene.start('MenuScene'),
+      onClick,
     });
-    btn.setDepth(51);
+    this.endBtn.setDepth(51);
+
+    this.layoutEndOverlay();
+  }
+
+  /** Separate from creation so the overlay survives a resize. */
+  private layoutEndOverlay(): void {
+    if (!this.endGfx || !this.endText || !this.endBtn) return;
+
+    const w = this.coords.canvasWidth;
+    const h = this.coords.canvasHeight;
+
+    this.endGfx.clear();
+    this.endGfx.fillStyle(0x000000, 0.85);
+    this.endGfx.fillRect(0, 0, w, h);
+
+    this.endText
+      .setPosition(Math.round(w / 2), Math.round(h * 0.35))
+      .setFontSize(this.coords.fontSize(0.08));
+
+    this.endBtn.setPosition(Math.round(w / 2), Math.round(h * 0.55));
+    this.endBtn.resize(
+      Math.max(200, w * 0.2),
+      Math.max(40, h * 0.06),
+      this.coords.fontSize(0.025),
+    );
   }
 }

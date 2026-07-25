@@ -5,22 +5,23 @@ export class CoordinateSystem {
   private scene: Phaser.Scene;
   private arenaWidth = DEFAULT_ARENA_WIDTH;
   private arenaHeight = DEFAULT_ARENA_HEIGHT;
+  private viewportRegion: LayoutRegion;
 
-  constructor(scene: Phaser.Scene) {
+  /**
+   * @param viewportRegion Which layout region the arena is drawn into.
+   *   Defaults to the combat game area; the world map passes LAYOUT.worldArea
+   *   since it has no side panel.
+   */
+  constructor(scene: Phaser.Scene, viewportRegion: LayoutRegion = LAYOUT.gameArea) {
     this.scene = scene;
+    this.viewportRegion = viewportRegion;
   }
 
   get canvasWidth(): number { return this.scene.scale.width; }
   get canvasHeight(): number { return this.scene.scale.height; }
 
   get viewportPixelRect(): { x: number; y: number; w: number; h: number } {
-    const region = LAYOUT.gameArea;
-    return {
-      x: this.canvasWidth * region.x,
-      y: this.canvasHeight * region.y,
-      w: this.canvasWidth * region.width,
-      h: this.canvasHeight * region.height,
-    };
+    return this.regionPixels(this.viewportRegion);
   }
 
   get scale(): number {
