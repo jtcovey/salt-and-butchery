@@ -569,13 +569,12 @@ Combat was also checked: the Lost Caravan encounter loads from the world map, pa
 sprites render on the field, and `UIButton` still drives the ability panel (ATTACK enters
 targeting and flips to CANCEL ATTACK).
 
-**Open question for B — world map locations trigger when *passed through*, not only when
-they're the destination.** Click a spot north of the town and the route runs over the town
-tile, which pulls the party inside. This is the same shape as the town-border bug and has
-the same fix available (only trigger when the location is the travel destination), but it
-is a design call, not obviously a defect: stumbling into an *encounter* while crossing the
-map may well be wanted, while being dragged into a *town* is just annoying. Nothing has
-been changed here pending that call.
+**Decided (B, 2026-07-25): world map locations trigger when passed through, and that
+stays.** Routing north past the town pulls the party in. B's call: a player will naturally
+steer around a town, so it's a non-issue for a human — the reason it kept catching *me* is
+that I was clicking exact tile coordinates from screenshots rather than playing. Do not
+"fix" this into destination-only triggering without asking; walking into an encounter
+while crossing the map is wanted behaviour.
 
 **Still untested:** victory/defeat routing back from an encounter, resizing the window
 mid-game, and the reveal chain (winning the caravan revealing the goblin tracks and nest).
