@@ -41,7 +41,17 @@ export class UnitRenderer {
     }
 
     for (const e of enemies) {
-      this.drawCircleUnit(e.x, e.y, e.radius, e.color, e.label, false, 1.0);
+      // A routed enemy reads as broken at a glance: dimmed, and marked with a
+      // '!' instead of its type glyph. Without this the only sign a morale
+      // check fired is that something wandered off, which is easy to miss in a
+      // room holding twenty of them.
+      const fleeing = e.fleeTurns > 0;
+      this.drawCircleUnit(
+        e.x, e.y, e.radius, e.color,
+        fleeing ? '!' : e.label,
+        false,
+        fleeing ? 0.55 : 1.0,
+      );
     }
 
     // Hide whatever the pools didn't need this pass.

@@ -551,6 +551,147 @@ Saved by the editor in World Map mode. Distinguished from encounters by `"kind":
 
 ---
 
+## Dungeons (`src/types/dungeon.ts`, `src/data/dungeonGen.ts`)
+
+A dungeon is **one map holding several fights, with movement in between** — the first
+thing in the game to break the "enter, kill everything, leave" assumption.
+
+### It is not a separate scene
+
+`CombatScene` gained an `explore` phase rather than growing a `DungeonScene` sibling. It
+already owned the terrain grid, float-position units, collision, DDA line of sight,
+pathfinding, the turn loop, the victory overlay and the side panel; a second scene would
+have duplicated ~800 lines to gain nothing. `CombatScene.init` already accepted an
+injected `levelData` (random encounters use it), so a dungeon travels the same path with
+`rooms` and a per-spawn `group` tag added.
+
+`GamePhase` is now `'explore' | 'player' | 'enemy' | 'victory' | 'defeat'`.
+
+### Engagements, and the array you must not reassign
+
+`TurnSystem` holds a **reference** to the enemies array and `checkVictory()` is just
+`enemies.length === 0`. That is the whole mechanism:
+
+- `CombatScene.groups` holds every pack in the dungeon, dormant.
+- `this.enemies` holds **only the pack currently engaged**.
+- Waking a pack splices its members in; clearing it empties the array, which reads as
+  victory, which is intercepted and turned into "this engagement ended".
+
+> **`this.enemies` must be mutated in place — `splice` / `length = 0` — never reassigned.**
+> Reassigning orphans TurnSystem's reference and victory silently stops firing forever
+> after. `cheatSkip()` did exactly this; it was harmless only because it called
+> `onVictory()` directly, and would have broken the second engagement of any dungeon.
+
+### No fog of war is required
+
+A pack wakes on **proximity + line of sight** (`ACTIVATION_RADIUS = 7`, reusing the
+existing DDA LOS so nothing wakes through rock). Dormant packs are drawn, so the player
+can see what's ahead and choose when to walk into it — that *is* the tactical content of
+explore mode. Fog and lighting are a later polish layer and were deliberately deferred by
+B; nothing here depends on them.
+
+### Movement
+
+Leader plus follower trail, ported from `WorldMapScene`. `TRAIL_SPACING = 2` because
+units are `UNIT_RADIUS 0.6` across — followers one tile apart would overlap by 0.2 and the
+party would drop into combat already interpenetrating. Followers whose trail slot the
+leader hasn't reached yet simply don't move, so the party files out of its starting
+formation instead of teleporting into a column.
+
+### The Goblin Nest
+
+Structure fixed per B, with exactly one roll: which south branch holds the barracks and
+which holds the garbage. `dungeonGen` emits a **room graph** carved into a grid — a real
+random generator later emits the same shape and the scene never learns the difference.
+
+```
+ENTRANCE (4 goblin archers + 4 skeletons) ── tunnel east ──┬── south A ──┐
+                                                           └── south B ──┤
+                                    coin flip: one is BARRACKS (8+4),    │
+                                               the other GARBAGE (dead end)
+                                                    │ 2-wide passage
+                                                    ▼
+                            BOSS ROOM — shaman + 8 archers + 12 warriors
+```
+
+**Pack placement is clustered, not scattered.** Greedy placement over a uniformly
+shuffled room spread the barracks out with its nearest two goblins 5 tiles apart — every
+pair outside the 4-tile morale window, so the rout mechanic below could never once fire.
+`tilesAroundCentre()` sorts candidates by distance from a centre instead. Measured after
+the change: 1.7 routs per kill at the entrance, ~3.1 in the barracks, ~3.4 in the boss
+room; tightest pair 2.0 tiles, zero overlaps over 400 generated maps.
+
+**Room descriptions** fire once, when the leader crosses a room's trigger rect. Combat
+rooms have none (B: they'd interrupt the approach). The boss room's trigger lives **in the
+approach corridor, not at its doorway** — at the doorway it never fired, because the party
+crosses the 7-tile activation line one row before the threshold and the fight always
+opened first.
+
+### Rewards and exit (B's calls)
+
+Full heal between engagements, XP per engagement rather than one payout, and the party can
+leave at any time with the nest **repopulating** on re-entry — no dungeon state is
+persisted at all, at the accepted cost of a farmable entrance pack.
+
+---
+
+## Enemy types (`src/data/enemies.ts`)
+
+One table, one spawn path (`spawnEnemy()`). Before it, every enemy in the game was
+`hp: 1, ac: 3` and `CombatScene` decided "is it an archer?" by string-comparing the spawn
+type.
+
+**Rank and file sit exactly on the tested `hp 1 / ac 3` line.** Giving skeletons `hp 2 /
+ac 4` to make them feel undead quietly doubled the difficulty of every random encounter
+B had already playtested and signed off on. Only the shaman is built harder. Statblocks
+here are invented — neither design doc gives monster stats — so they are guesses anchored
+to the party's real HP curve (`Salt & Butchery.md:28`: warriors 2 HP, everyone else 1,
++1 per level).
+
+### Morale — who can be routed
+
+`morale: 'breaks' | 'steady'`, and it comes straight from the lore rather than balance.
+`S&B Player's Glossary.md:105` describes undead as *"slow, shambling things. Mere slaves
+to their creators will"* — nothing there can panic. Goblins carry the Faefolk's gregarious
+nature "but twisted", and a social creature is exactly what breaks when its friend dies
+beside it.
+
+When any enemy dies, every surviving `breaks` enemy rolls:
+
+```
+chance% = 100 − 20 × tiles from the death      (adjacent 80%, 4 tiles 20%, beyond 4 none)
+```
+
+Distance is **rounded to whole tiles** first — units live at float positions, so two
+standing shoulder to shoulder are 1.2 apart and would read as 76%. On a failure the NPC
+gets `fleeTurns = d3` and `AISystem` moves it directly away from the nearest party member
+instead of fighting. Fleeing is deliberately *not* pathfound: a panicking creature doesn't
+route-plan, and being cornered is the correct outcome.
+
+The shaman is `steady`, which costs nothing and gives the boss room a real answer beyond
+"focus the nearest thing" — kill him first and twenty goblins become rout-prone, because
+nothing left in the room is holding.
+
+### The wall-break ambush
+
+Six goblins sit in a sealed pocket above the boss room, on the far side from the corridor
+the party came down. Rock blocks line of sight so they can never wake on proximity, and
+they are **hidden from the renderer** — on a fog-free map a visible pack in a closed pocket
+would advertise the whole thing. On turn 2 of the boss fight the marked wall tiles flip to
+floor, `MovementSystem` is re-pointed at the mutated grid so pathing and LOS agree with
+what's drawn, and they join the live roster behind the party. If the boss pack somehow dies
+first, `onVictory` springs the ambush instead of resolving.
+
+### Enemy phase pacing
+
+The flat 500ms-per-enemy pause read fine for five skeletons; the boss room holds 21, which
+is 10.5 seconds of watching per turn. Measured: deciding actions for the entire roster
+costs about **1ms**, so the delay was the whole cost and pathfinding was never the problem.
+It now compresses to fit `ENEMY_PHASE_BUDGET_MS` (5s), leaving fights of 10 or fewer
+exactly as they were.
+
+---
+
 ## Where this was left off (2026-07-25, `feature/world-map`)
 
 Notes for whoever picks this up next — including a fresh Claude with none of the session

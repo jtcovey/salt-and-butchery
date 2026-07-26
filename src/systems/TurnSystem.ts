@@ -40,6 +40,24 @@ export class TurnSystem {
     return active[0];
   }
 
+  /**
+   * Hand control to out-of-combat dungeon movement. No turns run in this phase;
+   * the scene walks the party until a dormant group notices them and calls
+   * beginPlayerTurn() again.
+   */
+  beginExplore(): void {
+    this.phase = 'explore';
+    this.onPhaseChange?.(this.phase);
+  }
+
+  /**
+   * Reset the turn counter between engagements so each fight in a dungeon
+   * starts at "Turn 1" rather than continuing a running total from the last one.
+   */
+  resetTurns(): void {
+    this.turn = 1;
+  }
+
   beginPlayerTurn(): void {
     this.phase = 'player';
     this.party.forEach(c => {

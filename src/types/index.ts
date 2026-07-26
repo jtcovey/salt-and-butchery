@@ -1,6 +1,10 @@
 export type CharacterClass = 'warrior' | 'thief' | 'sorcerer' | 'cleric';
 export type StatusEffect = 'prone' | 'beaten' | 'burning' | 'frozen' | 'poisoned' | 'stunned' | 'defending' | 'blessed' | 'warded';
-export type GamePhase = 'player' | 'enemy' | 'victory' | 'defeat';
+/**
+ * 'explore' is the out-of-combat dungeon mode: the party walks as a leader with
+ * a follower trail, no turns, until a dormant enemy group notices them.
+ */
+export type GamePhase = 'explore' | 'player' | 'enemy' | 'victory' | 'defeat';
 export type ItemType = 'weapon' | 'armor' | 'consumable' | 'key';
 export type BodyType = 1 | 2;
 

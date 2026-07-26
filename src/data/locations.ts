@@ -10,6 +10,8 @@ import { TILE_TRACKS, TILE_DESTROYED } from '../config/terrain';
 export interface LocationBehaviour {
   /** Encounter level launched when the party steps on this tile. */
   encounter?: string;
+  /** Multi-encounter dungeon generated when the party steps on this tile. */
+  dungeon?: string;
   /** Town map loaded when the party steps on this tile. */
   townMap?: string;
   /** Hidden from the map until this other location's encounter is won. */
@@ -29,6 +31,7 @@ export const LOCATION_BEHAVIOUR: Record<string, LocationBehaviour> = {
   },
   goblin_nest: {
     revealedBy: 'lost_caravan',
+    dungeon: 'goblin_nest',
     blurb: 'Something denned up in the rocks.',
   },
 };

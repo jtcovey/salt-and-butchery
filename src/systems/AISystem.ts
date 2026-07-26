@@ -26,6 +26,15 @@ export class AISystem {
       this.movement.distance(enemy, c) < this.movement.distance(enemy, best) ? c : best
     );
 
+    // Routed: run, don't fight. Checked before anything else so a fleeing
+    // goblin won't stop to take a free swing at whatever it's running past.
+    if (enemy.fleeTurns > 0) {
+      enemy.fleeTurns--;
+      const dest = this.moveAwayFrom(enemy, nearest, MOVE_PER_STAMINA, obstacles);
+      if (dest) actions.push({ type: 'move', destination: dest });
+      return actions;
+    }
+
     const isRanged = enemy.inventory.equippedWeaponType() === 'ranged';
 
     if (isRanged) {
@@ -68,6 +77,34 @@ export class AISystem {
     }
 
     return actions;
+  }
+
+  /**
+   * Directly away from `threat`, as far as one move allows.
+   *
+   * Deliberately not pathfound. A panicking creature doesn't route-plan, and
+   * running into a wall and being cornered is the correct outcome — it's what
+   * makes routing a real tactical event rather than a free escape. Falls back
+   * to sliding along each axis so a flat wall doesn't freeze it entirely.
+   */
+  private moveAwayFrom(enemy: NPC, threat: PC, maxDist: number, _obstacles: Obstacle[]): { x: number; y: number } | null {
+    const dx = enemy.x - threat.x;
+    const dy = enemy.y - threat.y;
+    const dist = Math.hypot(dx, dy);
+    // Standing exactly on the threat: any direction is away. Pick one.
+    const ux = dist > 0 ? dx / dist : 1;
+    const uy = dist > 0 ? dy / dist : 0;
+
+    const options = [
+      { x: enemy.x + ux * maxDist, y: enemy.y + uy * maxDist },
+      { x: enemy.x + ux * maxDist, y: enemy.y },
+      { x: enemy.x, y: enemy.y + uy * maxDist },
+      { x: enemy.x + ux * maxDist * 0.5, y: enemy.y + uy * maxDist * 0.5 },
+    ];
+    for (const opt of options) {
+      if (this.movement.isTilePassable(opt.x, opt.y)) return opt;
+    }
+    return null;
   }
 
   private moveToward(enemy: NPC, target: PC, maxDist: number, _obstacles: Obstacle[]): { x: number; y: number } | null {

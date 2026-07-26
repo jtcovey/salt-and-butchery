@@ -26,4 +26,11 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BootScene, MenuScene, PartyCreationScene, WorldMapScene, CombatScene, InventoryScene, ShopScene, OptionsScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// Dev-only handle for driving the game from the browser console — jumping
+// straight to a dungeon beats walking the world map every time you want to test
+// the third room. Stripped from production builds by the DEV guard.
+if (import.meta.env.DEV) {
+  (window as unknown as { game: Phaser.Game }).game = game;
+}

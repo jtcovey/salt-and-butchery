@@ -9,6 +9,7 @@ import {
 } from '../render/WorldRenderer';
 import { TopBar } from '../ui/TopBar';
 import { UIButton, BUTTON_CHROME } from '../ui/UIButton';
+import { DialogPanel } from '../ui/DialogPanel';
 import { LAYOUT } from '../config/constants';
 import { tileProps, isTileIdPassable, TILE_ROCK, TILE_ROAD } from '../config/terrain';
 import { findTilePath } from '../core/Pathfinding';
@@ -17,6 +18,7 @@ import { locationBehaviour, TILE_REVEALS } from '../data/locations';
 import { npcDialog, type DialogChoice, type NpcDialog } from '../data/townNpcs';
 import { saveGame } from '../core/SaveGame';
 import { generateEncounter } from '../data/encounterGen';
+import { generateGoblinNest } from '../data/dungeonGen';
 import { BaseScene } from './BaseScene';
 
 type WorldMode = 'travel' | 'look';
@@ -31,8 +33,6 @@ const MAX_TRAIL = 5;
  * tile so a marching line reads as close-packed without fully overlapping.
  */
 const TOWN_MEMBER_SCALE = 0.85;
-/** Pool size for dialog choice buttons. The Inn's three is the widest case. */
-const MAX_DIALOG_CHOICES = 4;
 /** Gold the Inn charges to put the party back on its feet. */
 const INN_REST_COST = 5;
 
@@ -71,7 +71,6 @@ export class WorldMapScene extends BaseScene {
   private mode: WorldMode = 'travel';
   private lookTile: Vec2 | null = null;
   private ready = false;
-  private dialogNpcId: string | null = null;
   /** NPC the party is walking toward; their dialog opens on arrival. */
   private talkTarget: string | null = null;
 
@@ -90,9 +89,8 @@ export class WorldMapScene extends BaseScene {
   private statusText!: Phaser.GameObjects.Text;
   private infoGfx!: Phaser.GameObjects.Graphics;
   private infoText!: Phaser.GameObjects.Text;
-  private dialogGfx!: Phaser.GameObjects.Graphics;
-  private dialogText!: Phaser.GameObjects.Text;
-  private dialogBtns: UIButton[] = [];
+  private dialog!: DialogPanel;
+  /** What the panel's buttons *mean*. The panel itself only knows their labels. */
   private dialogChoices: DialogChoice[] = [];
 
   constructor() { super({ key: 'WorldMapScene' }); }
@@ -298,7 +296,7 @@ export class WorldMapScene extends BaseScene {
   /** Single-tile step. Shared by the keyboard and the on-screen D-pad. */
   private tryMove(dx: number, dy: number): void {
     if (!this.ready || this.mode !== 'travel') return;
-    if (this.dialogNpcId) return; // dialogs are modal
+    if (this.dialog.isOpen) return; // dialogs are modal
     this.talkTarget = null; // manual movement abandons an approach
     this.stopWalk();
 
@@ -325,7 +323,7 @@ export class WorldMapScene extends BaseScene {
    */
   private travelTo(world: Vec2, talkTo: string | null = null): void {
     if (!this.ready || this.mode !== 'travel') return;
-    if (this.dialogNpcId) return; // dialogs are modal
+    if (this.dialog.isOpen) return; // dialogs are modal
 
     this.talkTarget = null;
 
@@ -359,7 +357,7 @@ export class WorldMapScene extends BaseScene {
    * within reach, they just talk.
    */
   private approachNpc(npc: WorldLocation): void {
-    if (!this.ready || this.mode !== 'travel' || this.dialogNpcId) return;
+    if (!this.ready || this.mode !== 'travel' || this.dialog.isOpen) return;
 
     if (this.isBesideNpc(npc, this.partyPos)) {
       this.openDialog(npc);
@@ -579,7 +577,7 @@ export class WorldMapScene extends BaseScene {
       return true;
     }
 
-    if (!behaviour.encounter) return false;
+    if (!behaviour.encounter && !behaviour.dungeon) return false;
     if (WorldState.isComplete(loc.id)) return false;
 
     this.stopWalk();
@@ -587,6 +585,10 @@ export class WorldMapScene extends BaseScene {
     this.scene.start('CombatScene', {
       party: this.party,
       levelFile: behaviour.encounter,
+      // Generated fresh on entry. Nothing about a dungeon is persisted, so
+      // leaving and coming back repopulates it — B's call, in exchange for no
+      // dungeon state to track.
+      dungeon: behaviour.dungeon === 'goblin_nest' ? generateGoblinNest() : undefined,
       encounterId: loc.id,
       // Default: come back to the tile that triggered it. Override per-encounter
       // by setting a different mapFile/tile here.
@@ -702,42 +704,21 @@ export class WorldMapScene extends BaseScene {
     });
     this.lookBtn.setDepth(10);
 
-    // NPC dialog — one panel reused for every speaker.
-    this.dialogGfx = this.add.graphics().setDepth(20).setVisible(false);
-    this.dialogText = this.add.text(0, 0, '', {
-      color: '#e8e4d8', fontFamily: 'monospace', align: 'center',
-    }).setOrigin(0.5, 0).setDepth(21).setVisible(false);
-    // Choice buttons. Pooled — a dialog shows as many as it needs, hides the rest.
-    // Phaser reuses the Scene INSTANCE across scene.restart(), so these fields
-    // survive while the GameObjects they point at do not. Entering a town is a
-    // restart; without this reset the array keeps destroyed buttons and the next
-    // setText() dies on a null canvas.
-    this.dialogBtns = [];
+    // NPC dialog — one panel reused for every speaker. Rebuilt here rather than
+    // reset, because Phaser reuses the Scene INSTANCE across scene.restart()
+    // (entering a town is a restart) and the old panel's GameObjects are gone.
+    this.dialog = new DialogPanel(this, this.coords);
     this.dialogChoices = [];
-    for (let i = 0; i < MAX_DIALOG_CHOICES; i++) {
-      const btn = new UIButton(this, 0, 0, {
-        text: 'OK', ...BUTTON_CHROME,
-        onClick: () => this.pickChoice(i),
-      });
-      btn.setDepth(21).setVisible(false);
-      this.dialogBtns.push(btn);
-    }
   }
 
   /** Re-opening the same speaker is a no-op; a different one replaces the panel. */
   private openDialog(npc: WorldLocation): void {
-    if (this.dialogNpcId === npc.id) return;
-    this.dialogNpcId = npc.id;
-
     const spec = npcDialog(npc.id);
-    if (!spec) {
-      // No written dialog yet — fall back to the label so the NPC still responds.
-      this.dialogText.setText(npc.label);
-      this.dialogChoices = [{ label: 'OK', action: 'close' }];
-    } else {
-      this.dialogText.setText(this.dialogTextFor(spec));
-      this.dialogChoices = spec.choices ?? [{ label: 'OK', action: 'close' }];
-    }
+    // No written dialog yet — fall back to the label so the NPC still responds.
+    const text = spec ? this.dialogTextFor(spec) : npc.label;
+    this.dialogChoices = spec?.choices ?? [{ label: 'OK', action: 'close' }];
+
+    this.dialog.open(npc.id, text, this.dialogChoices.map(c => c.label), i => this.pickChoice(i));
     this.layoutUI();
   }
 
@@ -776,8 +757,8 @@ export class WorldMapScene extends BaseScene {
   }
 
   private closeDialog(): void {
-    if (!this.dialogNpcId) return;
-    this.dialogNpcId = null;
+    if (!this.dialog.isOpen) return;
+    this.dialog.close();
     this.layoutUI();
   }
 
@@ -819,47 +800,7 @@ export class WorldMapScene extends BaseScene {
   }
 
   private layoutDialog(area: { x: number; y: number; w: number; h: number }): void {
-    const open = this.dialogNpcId !== null;
-    this.dialogGfx.setVisible(open);
-    this.dialogText.setVisible(open);
-    this.dialogBtns.forEach((b, i) => b.setVisible(open && i < this.dialogChoices.length));
-
-    this.dialogGfx.clear();
-    if (!open) return;
-
-    const fontSize = this.coords.fontSize(0.024);
-    this.dialogText.setFontSize(fontSize);
-
-    // Wrap to the panel rather than letting one long line set the width.
-    const panelW = Math.round(Math.min(area.w * 0.62, Math.max(area.w * 0.4, 460)));
-    const pad = Math.round(fontSize * 0.9);
-    this.dialogText.setWordWrapWidth(panelW - pad * 2);
-    this.dialogText.setAlign('left');
-    this.dialogText.setOrigin(0, 0);
-
-    const btnH = Math.max(26, Math.round(this.coords.canvasHeight * 0.05));
-    const panelH = Math.round(this.dialogText.height + btnH + pad * 3);
-    const panelX = Math.round(area.x + (area.w - panelW) / 2);
-    const panelY = Math.round(area.y + area.h - panelH - 12);
-
-    this.dialogGfx.fillStyle(0x0b0b18, 0.97);
-    this.dialogGfx.fillRect(panelX, panelY, panelW, panelH);
-    this.dialogGfx.lineStyle(2, 0x5588cc);
-    this.dialogGfx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
-
-    this.dialogText.setPosition(panelX + pad, panelY + pad);
-
-    // Choices share the panel width evenly along the bottom.
-    const n = this.dialogChoices.length;
-    const gap = Math.round(pad * 0.6);
-    const btnW = Math.round((panelW - pad * 2 - gap * (n - 1)) / n);
-    const btnY = Math.round(panelY + panelH - pad - btnH / 2);
-    this.dialogChoices.forEach((choice, i) => {
-      const btn = this.dialogBtns[i];
-      btn.setText(choice.label);
-      btn.setPosition(Math.round(panelX + pad + btnW / 2 + i * (btnW + gap)), btnY);
-      btn.resize(btnW, btnH, this.coords.fontSize(0.018));
-    });
+    this.dialog.layout(area);
   }
 
   private layoutUI(): void {
@@ -916,7 +857,7 @@ export class WorldMapScene extends BaseScene {
 
     // A dialog occupies the screen modally — hide the controls rather than
     // leaving live buttons under an opaque panel.
-    const talking = this.dialogNpcId !== null;
+    const talking = this.dialog.isOpen;
 
     this.panelGfx.clear();
     this.panelGfx.setVisible(!talking);
@@ -1016,7 +957,7 @@ export class WorldMapScene extends BaseScene {
 
     kb.on('keydown-L', () => this.setMode(this.mode === 'look' ? 'travel' : 'look'));
     kb.on('keydown-ESC', () => {
-      if (this.dialogNpcId) this.closeDialog();
+      if (this.dialog.isOpen) this.closeDialog();
       else if (this.mode === 'look') this.setMode('travel');
       else this.stopWalk();
     });
