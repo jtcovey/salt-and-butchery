@@ -58,6 +58,11 @@ The game uses a hybrid approach: free circle-based movement over a tile-based te
 
   Ids 0 and 1 are frozen — existing level files depend on them. Unknown ids fall back to grass so a malformed level degrades gracefully instead of crashing. Forest is passable but blocks physical ranged attacks, making woods real cover; magic still passes through.
 - **Grid lines**: togglable via `GameOptions.showGrid` (press **G** in combat, or toggle in Options menu).
+  Tile size is almost never a whole number of pixels — letterbox-fitting a 60x40 arena lands on values
+  like 16.78px — so `TerrainRenderer` rounds every tile edge ONCE into `xs[]`/`ys[]` tables and draws
+  both the tile fills and the grid lines from them. That guarantees the two agree (no seams) and that
+  every line sits on a real pixel column. Lines are width 1 at +0.5 offset; the old 0.5px width had no
+  reliable rasterisation and ~60% of lines vanished at any resolution where tile size was fractional.
 - **Level files**: JSON in `public/levels/`, loaded by CombatScene via `fetch()`. Contains `terrainGrid`, `partySpawn` positions, and `enemies` array.
 - **Line of Sight (DDA algorithm)**: physical ranged attacks (arrows, Trick Shot) are blocked by rock tiles. The ray traverses each grid cell between attacker and target — if any cell is impassable, the shot is blocked. Magic (Curse, Bless, Heal) passes through rocks. Melee/Frenzy ignores terrain.
 - **A\* Pathfinding**: enemy AI uses grid-based A\* (Manhattan heuristic, 4-directional) to navigate around rocks. Archers move to get line of sight when blocked.

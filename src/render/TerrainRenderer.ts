@@ -44,13 +44,31 @@ export class TerrainRenderer {
     if (terrainGrid && terrainGrid.length > 0) {
       const rows = terrainGrid.length;
       const cols = terrainGrid[0].length;
+
+      /**
+       * Snapped edge tables — the fix for grid lines vanishing at some scales.
+       *
+       * Tile size `s` is almost never a whole number of pixels (letterbox-fit
+       * of a 60x40 arena lands on things like 16.8). Drawing tiles and lines at
+       * raw fractional coords means each edge straddles a pixel boundary by a
+       * different amount, so some lines rasterise and some smear into nothing.
+       *
+       * Rounding every edge ONCE, here, and using the same numbers for the tile
+       * fills and the grid lines guarantees the two agree: no seams between
+       * tiles, and every line lands on a real pixel column. Cells end up 1px
+       * uneven here and there, which is invisible and correct for pixel art.
+       */
+      const xs: number[] = [];
+      for (let c = 0; c <= cols; c++) xs.push(Math.round(this.coords.worldToScreen(c, 0).x));
+      const ys: number[] = [];
+      for (let r = 0; r <= rows; r++) ys.push(Math.round(this.coords.worldToScreen(0, r).y));
+
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const tileId = terrainGrid[r][c];
           const color = tileProps(tileId).color;
-          const pos = this.coords.worldToScreen(c, r);
           this.gfx.fillStyle(color);
-          this.gfx.fillRect(pos.x, pos.y, s, s);
+          this.gfx.fillRect(xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r]);
         }
       }
 
@@ -69,16 +87,17 @@ export class TerrainRenderer {
       }
 
       if (GameOptions.showGrid) {
-        this.gfx.lineStyle(0.5, 0x1a1a1a, 0.3);
+        // Width 1, not 0.5 — a sub-pixel line has no reliable rasterisation and
+        // was the other half of the vanishing-lines bug. The +0.5 offset centres
+        // a 1px stroke inside one pixel column instead of splitting two.
+        this.gfx.lineStyle(1, 0x1a1a1a, 0.35);
+        const top = ys[0], bottom = ys[rows];
         for (let c = 0; c <= cols; c++) {
-          const p = this.coords.worldToScreen(c, 0);
-          const p2 = this.coords.worldToScreen(c, rows);
-          this.gfx.lineBetween(p.x, p.y, p2.x, p2.y);
+          this.gfx.lineBetween(xs[c] + 0.5, top, xs[c] + 0.5, bottom);
         }
+        const left = xs[0], right = xs[cols];
         for (let r = 0; r <= rows; r++) {
-          const p = this.coords.worldToScreen(0, r);
-          const p2 = this.coords.worldToScreen(cols, r);
-          this.gfx.lineBetween(p.x, p.y, p2.x, p2.y);
+          this.gfx.lineBetween(left, ys[r] + 0.5, right, ys[r] + 0.5);
         }
       }
     } else {
