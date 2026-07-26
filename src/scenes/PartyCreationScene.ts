@@ -137,6 +137,9 @@ export class PartyCreationScene extends BaseScene {
       fontSize: '14px', color: '#ccddff', fontFamily: 'monospace', fontStyle: 'bold',
     }).setOrigin(0.5, 0).setDepth(102).setVisible(false);
 
+    // Reset before repopulating — the Scene instance is reused across
+    // scene.start(), so a second New Game would keep the destroyed zones.
+    this.paletteZones = [];
     const most = Math.max(SKIN_TONES.length, CLOTH_COLORS.length);
     for (let i = 0; i < most; i++) {
       const z = this.add.zone(0, 0, 10, 10)

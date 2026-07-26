@@ -245,6 +245,11 @@ export class CombatScene extends BaseScene {
   }
 
   private buildUI(): void {
+    // Phaser reuses the Scene INSTANCE across scene.start(), so these fields
+    // outlive the GameObjects they hold. Returning to combat a second time left
+    // destroyed buttons in the pool and drawSidePanel died on a null canvas.
+    this.actionBtns = [];
+
     this.topBar = new TopBar(this, this.coords, {
       party: this.party,
       onOptions: () => this.openOptions(),
@@ -1042,6 +1047,9 @@ export class CombatScene extends BaseScene {
 
   /** Cheat: wipe the field and take the normal victory path, XP and all. */
   private cheatSkip(): void {
+    // loadLevel is async; without this an impatient click lands before
+    // finishSetup has built TurnSystem and throws on this.turns.
+    if (!this.ready) return;
     if (this.turns.phase === 'victory' || this.turns.phase === 'defeat') return;
     for (const e of this.enemies) { e.hp = 0; e.dead = true; }
     this.enemies = [];

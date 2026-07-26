@@ -4,5 +4,5 @@ export const GameOptions = {
   sfxVolume: 0.5,
   showGrid: true,
   /** Debug: shows an 'S' button in combat that instantly wins the fight. */
-  showCheatSkip: false,
+  showCheatSkip: true,
 };

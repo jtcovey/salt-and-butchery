@@ -487,7 +487,10 @@ export class WorldMapScene extends BaseScene {
     this.stopWalk();
     WorldState.partyTile = { x: pos.x, y: pos.y };
 
-    const enc = generateEncounter(this.party.filter(p => !p.dead).length);
+    const alive = this.party.filter(p => !p.dead);
+    // Party level drives both the enemy dice and the map size.
+    const level = Math.max(1, ...this.party.map(p => p.level));
+    const enc = generateEncounter(alive.length, level);
     this.scene.start('CombatScene', {
       party: this.party,
       levelData: {

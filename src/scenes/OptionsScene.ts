@@ -47,7 +47,7 @@ export class OptionsScene extends BaseScene {
       { key: 'godMode', label: 'GOD MODE' },
       { key: 'autoEndTurn', label: 'AUTO END TURN' },
       { key: 'showGrid', label: 'SHOW GRID' },
-      { key: 'showCheatSkip', label: 'SHOW CHEAT SKIP BUTTON IN COMBAT' },
+      { key: 'showCheatSkip', label: 'SHOW CHEAT SKIP' },
     ];
 
     for (const toggle of toggles) {
@@ -149,7 +149,9 @@ export class OptionsScene extends BaseScene {
     const cx = this.coords.canvasWidth / 2;
     const cy = this.coords.canvasHeight / 2;
 
-    this.titleText.setPosition(cx, cy - this.coords.canvasHeight * 0.2)
+    // Absolute fraction of height, not relative to centre — keeps a real margin
+    // above the toggle stack instead of drifting into it as the list grows.
+    this.titleText.setPosition(cx, Math.round(this.coords.canvasHeight * 0.15))
       .setFontSize(this.coords.fontSize(0.05));
 
     const btnW = Math.max(240, this.coords.canvasWidth * 0.22);

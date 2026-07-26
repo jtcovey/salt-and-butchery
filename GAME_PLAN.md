@@ -702,9 +702,18 @@ Inn has an explicit Save button rather than a checkpoint.
 - [x] Cheat 'S' skip button under 'O', gated on a new Options toggle
 - [x] Random encounters: 0% after a fight, +10%/tile off-road, 50% cap, reset on trigger.
       **Roads never roll and reset to 0**, so the road is genuinely safe passage
-- [x] `src/data/encounterGen.ts` — procedural 30x22 maps, weighted formation table
-      (Together 45 / Split 18 / Ambushed 15 / Scattered 12 / The Drop 10), 1-6 enemies
-      at ~⅓ archers, spawns nudged clear of rock. Seeded, so a bad map is reproducible
+- [x] `src/data/encounterGen.ts` — procedural maps, weighted formation table
+      (Together 45 / Split 18 / Ambushed 15 / Scattered 12 / The Drop 10), ~⅓ archers.
+      Seeded, so a bad map is reproducible from its number
+- [x] Scales with party level: enemies are `level`d6 (L1 1d6, L2 2d6), and the map grows
+      +25% per level (30x22 → 38x28 → 45x33) with rock and forest counts scaled by AREA,
+      so cover density stays constant instead of thinning out
+- [x] Spawn overlap fixed. Root cause was `clearSpawn` snapping to tile CENTRES — any two
+      spawns in one tile collapsed onto the identical point. These units are circles at
+      float positions, so the quantising was never needed. Now: keep the float position,
+      only relocate off rock, then a relaxation pass separates every pair (party and
+      enemies together). Rock and separation fight each other, so the two alternate until
+      both hold. Verified 0 overlaps / 0 in-rock / 0 off-grid over 1500 maps per level, L1–L4
 - [ ] Random encounters give no gold yet — only XP
 - [ ] GameOptions isn't persisted, so the cheat toggle resets on every page reload
 
