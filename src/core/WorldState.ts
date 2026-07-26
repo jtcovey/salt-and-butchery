@@ -3,6 +3,11 @@ import type { Vec2 } from '../types';
 /** Enough to actually shop with while the economy is being tested. */
 export const STARTING_GOLD = 500;
 
+/** Percentage points of encounter chance gained per tile of open ground. */
+export const ENCOUNTER_STEP = 10;
+/** Ceiling on that chance, so travel never becomes a certainty per step. */
+export const ENCOUNTER_MAX = 50;
+
 /**
  * Campaign state that outlives a single scene.
  *
@@ -39,12 +44,33 @@ export const WorldState = {
    */
   townReturn: null as { mapFile: string; tile: Vec2 } | null,
 
+  /**
+   * Rising chance of a random fight, in percent.
+   *
+   * Starts at 0 after every encounter, climbs by ENCOUNTER_STEP per tile of
+   * open ground, caps at ENCOUNTER_MAX. Roads never roll and reset it to 0 —
+   * so the road is genuinely safer, and a player who sticks to it can cross the
+   * map untouched. Straying off it is a decision with a cost curve.
+   */
+  encounterChance: 0,
+
   isComplete(locationId: string): boolean {
     return this.completedEncounters.has(locationId);
   },
 
   markComplete(locationId: string): void {
     this.completedEncounters.add(locationId);
+  },
+
+  /** Walked a tile of open ground: raise the odds, then roll them. */
+  rollEncounter(onRoad: boolean, rng: () => number = Math.random): boolean {
+    if (onRoad) { this.encounterChance = 0; return false; }
+    this.encounterChance = Math.min(ENCOUNTER_MAX, this.encounterChance + ENCOUNTER_STEP);
+    if (rng() * 100 < this.encounterChance) {
+      this.encounterChance = 0;
+      return true;
+    }
+    return false;
   },
 
   acceptQuest(questId: string): void {
@@ -78,5 +104,6 @@ export const WorldState = {
     this.acceptedQuests = new Set<string>();
     this.gold = STARTING_GOLD;
     this.townReturn = null;
+    this.encounterChance = 0;
   },
 };

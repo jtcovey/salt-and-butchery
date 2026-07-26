@@ -690,8 +690,26 @@ Inn has an explicit Save button rather than a checkpoint.
 - [ ] Optional save-code export/import (J's idea). Feasible now at roughly 300 bytes of
       state; gets less feasible the longer it's left
 
+#### 5. XP, Levelling, Random Encounters
+- [x] `xp` on PC; thresholds in `src/data/leveling.ts`. NOTE: the design doc has NO XP
+      system ("Levels are awarded by the DM"), so the thresholds are OURS and labelled
+      as such. Level effects ARE from the doc: +1 Max HP, +1 class skill, +1 Stamina on
+      even levels, abilities unlock by level
+- [x] Award is 100 + 5/enemy; level 2 = 140, exactly what TestMap1's 8 enemies pay
+- [x] Victory overlay shows XP and per-character level-ups between title and button
+- [x] Level 2 abilities implemented: Sling, Assassinate, Pishogue. Blitz, Lightning Bolt,
+      Grapple and Consecrate need engine work and are documented in classActions.ts
+- [x] Cheat 'S' skip button under 'O', gated on a new Options toggle
+- [x] Random encounters: 0% after a fight, +10%/tile off-road, 50% cap, reset on trigger.
+      **Roads never roll and reset to 0**, so the road is genuinely safe passage
+- [x] `src/data/encounterGen.ts` — procedural 30x22 maps, weighted formation table
+      (Together 45 / Split 18 / Ambushed 15 / Scattered 12 / The Drop 10), 1-6 enemies
+      at ~⅓ archers, spawns nudged clear of rock. Seeded, so a bad map is reproducible
+- [ ] Random encounters give no gold yet — only XP
+- [ ] GameOptions isn't persisted, so the cheat toggle resets on every page reload
+
 ### Mid Term
-- [ ] Levels 2-7 abilities for all classes (design doc has full progression)
+- [ ] Levels 3-7 abilities for all classes (design doc has full progression)
 - [ ] More enemy types (armored, magic, ranged variants)
 - [ ] XP and leveling system
 - [ ] Whirlwind ability for warrior (360° melee AoE, reserved in code as `area` target type)

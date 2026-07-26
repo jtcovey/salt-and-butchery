@@ -10,12 +10,13 @@ import {
 import { TopBar } from '../ui/TopBar';
 import { UIButton, BUTTON_CHROME } from '../ui/UIButton';
 import { LAYOUT } from '../config/constants';
-import { tileProps, isTileIdPassable, TILE_ROCK } from '../config/terrain';
+import { tileProps, isTileIdPassable, TILE_ROCK, TILE_ROAD } from '../config/terrain';
 import { findTilePath } from '../core/Pathfinding';
 import { WorldState } from '../core/WorldState';
 import { locationBehaviour, TILE_REVEALS } from '../data/locations';
 import { npcDialog, type DialogChoice, type NpcDialog } from '../data/townNpcs';
 import { saveGame } from '../core/SaveGame';
+import { generateEncounter } from '../data/encounterGen';
 import { BaseScene } from './BaseScene';
 
 type WorldMode = 'travel' | 'look';
@@ -458,8 +459,47 @@ export class WorldMapScene extends BaseScene {
     }
 
     if (this.checkLocationTrigger()) return true;
+
+    // Random encounters. Towns are safe, and so are roads — a road tile never
+    // rolls and resets the counter, so sticking to the road can cross the map
+    // untouched and leaving it is a decision with a rising cost.
+    if (this.mapKind === 'worldmap' && this.checkRandomEncounter(pos)) return true;
+
     this.reportStandingOn();
     return false;
+  }
+
+  /**
+   * Roll for a random fight on the tile just entered. Returns true if one
+   * started, which ends the scene.
+   */
+  private checkRandomEncounter(pos: Vec2): boolean {
+    const col = Math.floor(pos.x);
+    const row = Math.floor(pos.y);
+    if (!this.inBounds(col, row)) return false;
+
+    const onRoad = this.terrainGrid[row][col] === TILE_ROAD;
+    if (!WorldState.rollEncounter(onRoad)) {
+      if (!onRoad) this.setStatus(`Danger ${WorldState.encounterChance}%`);
+      return false;
+    }
+
+    this.stopWalk();
+    WorldState.partyTile = { x: pos.x, y: pos.y };
+
+    const enc = generateEncounter(this.party.filter(p => !p.dead).length);
+    this.scene.start('CombatScene', {
+      party: this.party,
+      levelData: {
+        terrainGrid: enc.terrainGrid,
+        partySpawn: enc.partySpawn,
+        enemies: enc.enemies,
+      },
+      // No encounterId — a random fight is not a location, so it must not mark
+      // anything complete or it would silently clear a real quest objective.
+      returnTo: { scene: 'WorldMapScene', mapFile: this.mapFile, tile: { x: pos.x, y: pos.y } },
+    });
+    return true;
   }
 
   private isEdgeTile(col: number, row: number): boolean {

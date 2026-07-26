@@ -58,6 +58,7 @@ export class CombatScene extends BaseScene {
   /** False until loadLevel resolves and finishSetup wires TurnSystem/AISystem. */
   private ready = false;
   private levelFile = DEFAULT_LEVEL;
+  private levelData: { terrainGrid: number[][]; partySpawn: {x:number;y:number}[]; enemies: {type:string;x:number;y:number}[] } | null = null;
 
   // Undo state
   private undoSnapshot: {
@@ -98,11 +99,14 @@ export class CombatScene extends BaseScene {
   init(data?: {
     party?: PC[];
     levelFile?: string;
+    /** Pre-built level, used by random encounters instead of fetching a file. */
+    levelData?: { terrainGrid: number[][]; partySpawn: {x:number;y:number}[]; enemies: {type:string;x:number;y:number}[] };
     encounterId?: string;
     returnTo?: CombatReturn;
   }) {
     if (data?.party) this.party = data.party;
     this.levelFile = data?.levelFile ?? DEFAULT_LEVEL;
+    this.levelData = data?.levelData ?? null;
     this.encounterId = data?.encounterId ?? null;
     this.returnTo = data?.returnTo ?? { scene: 'MenuScene' };
   }
@@ -133,8 +137,8 @@ export class CombatScene extends BaseScene {
 
   private async loadLevel(path: string): Promise<void> {
     try {
-      const resp = await fetch(path);
-      const data = await resp.json();
+      // A generated encounter arrives already built; only fetch when it didn't.
+      const data = this.levelData ?? await (await fetch(path)).json();
 
       if (data.terrainGrid) {
         this.terrainGrid = data.terrainGrid;
