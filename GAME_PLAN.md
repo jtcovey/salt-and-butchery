@@ -679,7 +679,12 @@ Inn has an explicit Save button rather than a checkpoint.
 - [x] Inn with **Rest** (5g, full heal incl. dead) and **Save**
 - [x] `localStorage` save/load — manual only, versioned, items stored by id
 - [ ] Wire **Continue** on the main menu to `loadGame()` (save works; nothing loads it yet)
-- [ ] Sell-back at the vendor
+- [x] Sell mode — SELL toggles the same list widget to the party's carried items,
+      grouped by owner. Click anywhere on a row to sell; a cursor-following tooltip
+      shows name, stats, value, owner, and whether the item is currently EQUIPPED
+- [ ] `SELL_RATE` in ShopScene.ts is 1.0 (vendor pays full price). The design doc gives
+      buy prices and says nothing about a markdown, so no rate was invented — change that
+      one constant if the vendor should take a cut
 - [ ] Silver→gold rate — the doc prices Oilpot at 25s and Lantern at 50s but never states
       a conversion, so both are deliberately unstocked rather than priced on a guess
 - [ ] Optional save-code export/import (J's idea). Feasible now at roughly 300 bytes of
