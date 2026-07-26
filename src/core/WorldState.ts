@@ -23,6 +23,13 @@ export const WorldState = {
   /** Location ids whose encounter has been won. Drives reveals and re-entry. */
   completedEncounters: new Set<string>(),
 
+  /**
+   * Quests the party has taken on. Separate from completions: accepting the
+   * Mayor's job and finding the caravan are different states, and NPC dialog
+   * keys off both.
+   */
+  acceptedQuests: new Set<string>(),
+
   /** Shared party purse. Not per-character — the party spends as one. */
   gold: STARTING_GOLD,
 
@@ -38,6 +45,14 @@ export const WorldState = {
 
   markComplete(locationId: string): void {
     this.completedEncounters.add(locationId);
+  },
+
+  acceptQuest(questId: string): void {
+    this.acceptedQuests.add(questId);
+  },
+
+  hasQuest(questId: string): boolean {
+    return this.acceptedQuests.has(questId);
   },
 
   /** True when the purse can cover a cost. */
@@ -60,6 +75,7 @@ export const WorldState = {
     this.mapFile = 'maps/WorldCH1.json';
     this.partyTile = null;
     this.completedEncounters = new Set<string>();
+    this.acceptedQuests = new Set<string>();
     this.gold = STARTING_GOLD;
     this.townReturn = null;
   },

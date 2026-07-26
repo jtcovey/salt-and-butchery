@@ -14,6 +14,8 @@ import { tileProps, isTileIdPassable, TILE_ROCK } from '../config/terrain';
 import { findTilePath } from '../core/Pathfinding';
 import { WorldState } from '../core/WorldState';
 import { locationBehaviour, TILE_REVEALS } from '../data/locations';
+import { npcDialog, type DialogChoice, type NpcDialog } from '../data/townNpcs';
+import { saveGame } from '../core/SaveGame';
 import { BaseScene } from './BaseScene';
 
 type WorldMode = 'travel' | 'look';
@@ -28,6 +30,10 @@ const MAX_TRAIL = 5;
  * tile so a marching line reads as close-packed without fully overlapping.
  */
 const TOWN_MEMBER_SCALE = 0.85;
+/** Pool size for dialog choice buttons. The Inn's three is the widest case. */
+const MAX_DIALOG_CHOICES = 4;
+/** Gold the Inn charges to put the party back on its feet. */
+const INN_REST_COST = 5;
 
 export class WorldMapScene extends BaseScene {
   private coords!: CoordinateSystem;
@@ -85,7 +91,8 @@ export class WorldMapScene extends BaseScene {
   private infoText!: Phaser.GameObjects.Text;
   private dialogGfx!: Phaser.GameObjects.Graphics;
   private dialogText!: Phaser.GameObjects.Text;
-  private dialogBtn!: UIButton;
+  private dialogBtns: UIButton[] = [];
+  private dialogChoices: DialogChoice[] = [];
 
   constructor() { super({ key: 'WorldMapScene' }); }
 
@@ -657,19 +664,72 @@ export class WorldMapScene extends BaseScene {
     this.dialogText = this.add.text(0, 0, '', {
       color: '#e8e4d8', fontFamily: 'monospace', align: 'center',
     }).setOrigin(0.5, 0).setDepth(21).setVisible(false);
-    this.dialogBtn = new UIButton(this, 0, 0, {
-      text: 'OK', ...BUTTON_CHROME,
-      onClick: () => this.closeDialog(),
-    });
-    this.dialogBtn.setDepth(21).setVisible(false);
+    // Choice buttons. Pooled — a dialog shows as many as it needs, hides the rest.
+    // Phaser reuses the Scene INSTANCE across scene.restart(), so these fields
+    // survive while the GameObjects they point at do not. Entering a town is a
+    // restart; without this reset the array keeps destroyed buttons and the next
+    // setText() dies on a null canvas.
+    this.dialogBtns = [];
+    this.dialogChoices = [];
+    for (let i = 0; i < MAX_DIALOG_CHOICES; i++) {
+      const btn = new UIButton(this, 0, 0, {
+        text: 'OK', ...BUTTON_CHROME,
+        onClick: () => this.pickChoice(i),
+      });
+      btn.setDepth(21).setVisible(false);
+      this.dialogBtns.push(btn);
+    }
   }
 
-  /** Re-opening the same speaker is a no-op; a different one replaces the text. */
+  /** Re-opening the same speaker is a no-op; a different one replaces the panel. */
   private openDialog(npc: WorldLocation): void {
     if (this.dialogNpcId === npc.id) return;
     this.dialogNpcId = npc.id;
-    this.dialogText.setText(npc.label);
+
+    const spec = npcDialog(npc.id);
+    if (!spec) {
+      // No written dialog yet — fall back to the label so the NPC still responds.
+      this.dialogText.setText(npc.label);
+      this.dialogChoices = [{ label: 'OK', action: 'close' }];
+    } else {
+      this.dialogText.setText(this.dialogTextFor(spec));
+      this.dialogChoices = spec.choices ?? [{ label: 'OK', action: 'close' }];
+    }
     this.layoutUI();
+  }
+
+  /** Later text wins once its trigger encounter is done — NPCs notice progress. */
+  private dialogTextFor(spec: NpcDialog): string {
+    for (const [encounterId, text] of Object.entries(spec.textAfter ?? {})) {
+      if (WorldState.isComplete(encounterId)) return text;
+    }
+    return spec.text;
+  }
+
+  private pickChoice(index: number): void {
+    const choice = this.dialogChoices[index];
+    if (!choice) return;
+
+    switch (choice.action) {
+      case 'close':
+        this.closeDialog();
+        break;
+      case 'accept_quest':
+        WorldState.acceptQuest('lost_caravan');
+        this.closeDialog();
+        this.setStatus('Quest accepted: find the lost caravan.');
+        break;
+      case 'shop':
+        this.closeDialog();
+        this.openShop();
+        break;
+      case 'rest':
+        this.restParty();
+        break;
+      case 'save':
+        this.saveGame();
+        break;
+    }
   }
 
   private closeDialog(): void {
@@ -678,21 +738,63 @@ export class WorldMapScene extends BaseScene {
     this.layoutUI();
   }
 
+  /**
+   * The Inn. Charges up front, heals everyone including the dead — a bed and a
+   * week is what separates "beaten" from "gone" in this game's fiction.
+   * Refuses rather than partially healing if the purse is short.
+   */
+  private restParty(): void {
+    if (!WorldState.spend(INN_REST_COST)) {
+      this.setStatus(`Not enough gold — a bed costs ${INN_REST_COST}.`);
+      return;
+    }
+    for (const pc of this.party) {
+      pc.hp = pc.maxHp;
+      pc.stamina = pc.maxStamina;
+      pc.dead = false;
+      pc.status = [];
+    }
+    this.closeDialog();
+    this.topBar.layout();
+    this.setStatus(`The party rests. (-${INN_REST_COST} gold)`);
+  }
+
+  /** Manual save only — B's call, so the player chooses when to overwrite. */
+  private saveGame(): void {
+    const ok = saveGame(this.party);
+    this.closeDialog();
+    this.setStatus(ok ? 'Game saved.' : 'Save failed — browser storage unavailable.');
+  }
+
+  private openShop(): void {
+    this.scene.launch('ShopScene', {
+      returnTo: this.scene.key,
+      overlay: true,
+      party: this.party,
+    });
+    this.scene.pause();
+  }
+
   private layoutDialog(area: { x: number; y: number; w: number; h: number }): void {
     const open = this.dialogNpcId !== null;
     this.dialogGfx.setVisible(open);
     this.dialogText.setVisible(open);
-    this.dialogBtn.setVisible(open);
+    this.dialogBtns.forEach((b, i) => b.setVisible(open && i < this.dialogChoices.length));
 
     this.dialogGfx.clear();
     if (!open) return;
 
-    const fontSize = this.coords.fontSize(0.026);
+    const fontSize = this.coords.fontSize(0.024);
     this.dialogText.setFontSize(fontSize);
 
-    const panelW = Math.round(Math.max(area.w * 0.34, this.dialogText.width + fontSize * 4));
+    // Wrap to the panel rather than letting one long line set the width.
+    const panelW = Math.round(Math.min(area.w * 0.62, Math.max(area.w * 0.4, 460)));
+    const pad = Math.round(fontSize * 0.9);
+    this.dialogText.setWordWrapWidth(panelW - pad * 2);
+    this.dialogText.setAlign('left');
+    this.dialogText.setOrigin(0, 0);
+
     const btnH = Math.max(26, Math.round(this.coords.canvasHeight * 0.05));
-    const pad = Math.round(fontSize * 0.8);
     const panelH = Math.round(this.dialogText.height + btnH + pad * 3);
     const panelX = Math.round(area.x + (area.w - panelW) / 2);
     const panelY = Math.round(area.y + area.h - panelH - 12);
@@ -702,12 +804,19 @@ export class WorldMapScene extends BaseScene {
     this.dialogGfx.lineStyle(2, 0x5588cc);
     this.dialogGfx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
-    this.dialogText.setPosition(Math.round(panelX + panelW / 2), panelY + pad);
-    this.dialogBtn.setPosition(
-      Math.round(panelX + panelW / 2),
-      Math.round(panelY + panelH - pad - btnH / 2),
-    );
-    this.dialogBtn.resize(Math.round(panelW * 0.3), btnH, this.coords.fontSize(0.02));
+    this.dialogText.setPosition(panelX + pad, panelY + pad);
+
+    // Choices share the panel width evenly along the bottom.
+    const n = this.dialogChoices.length;
+    const gap = Math.round(pad * 0.6);
+    const btnW = Math.round((panelW - pad * 2 - gap * (n - 1)) / n);
+    const btnY = Math.round(panelY + panelH - pad - btnH / 2);
+    this.dialogChoices.forEach((choice, i) => {
+      const btn = this.dialogBtns[i];
+      btn.setText(choice.label);
+      btn.setPosition(Math.round(panelX + pad + btnW / 2 + i * (btnW + gap)), btnY);
+      btn.resize(btnW, btnH, this.coords.fontSize(0.018));
+    });
   }
 
   private layoutUI(): void {

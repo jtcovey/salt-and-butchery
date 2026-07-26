@@ -666,12 +666,17 @@ Inn has an explicit Save button rather than a checkpoint.
 
 #### 4. Town Economy & Saving
 - [x] Party gold (`WorldState`, 500 to start, shown in the inventory screen)
-- [ ] `price` field on `Item`; values from the design doc (sword 2g, mail 10g, plate 50g)
-- [ ] Shop UI on the vendor NPC — buy and sell against party gold
-- [ ] Mayor's caravan quest dialog (caravan overdue a week, supplies running low)
-- [ ] Inn with **Rest** and **Save** buttons
-- [ ] `localStorage` save/load — manual only, no autosave, so the player chooses when a
-      save is overwritten
+- [x] `price` on `Item`; every value transcribed from the design doc's Equipment section
+- [x] Full stock: 3 armours, 6 weapons, 4 consumables, with stat requirements enforced
+- [x] `ShopScene` — per-character buying, purchases replace the equipped item
+- [x] Dialog panel generalised to paragraphs + choice buttons
+- [x] Mayor's caravan quest; `WorldState.acceptedQuests`; dialog changes after the encounter
+- [x] Inn with **Rest** (5g, full heal incl. dead) and **Save**
+- [x] `localStorage` save/load — manual only, versioned, items stored by id
+- [ ] Wire **Continue** on the main menu to `loadGame()` (save works; nothing loads it yet)
+- [ ] Sell-back at the vendor
+- [ ] Silver→gold rate — the doc prices Oilpot at 25s and Lantern at 50s but never states
+      a conversion, so both are deliberately unstocked rather than priced on a guess
 - [ ] Optional save-code export/import (J's idea). Feasible now at roughly 300 bytes of
       state; gets less feasible the longer it's left
 
