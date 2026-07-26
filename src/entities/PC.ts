@@ -7,6 +7,8 @@ import { Character } from './Character';
 export class PC extends Character {
   charClass: CharacterClass;
   level: number;
+  /** Total experience. Levels are derived from this; see data/leveling.ts. */
+  xp = 0;
   stamina: number;
   maxStamina: number;
   skills: CharacterSkills;
@@ -60,6 +62,6 @@ export class PC extends Character {
   }
 
   availableActions(_gameState: GameState): Action[] {
-    return getActionsForClass(this.charClass);
+    return getActionsForClass(this.charClass, this.level);
   }
 }

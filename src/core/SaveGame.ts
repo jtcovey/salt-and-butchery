@@ -21,7 +21,7 @@ const SAVE_KEY = 'salt-and-butchery:save:v1';
 const SAVE_VERSION = 1;
 
 interface SavedPC {
-  id: string; name: string; charClass: CharacterClass; level: number;
+  id: string; name: string; charClass: CharacterClass; level: number; xp: number;
   hp: number; maxHp: number; ac: number;
   stamina: number; maxStamina: number; skills: CharacterSkills;
   radius: number; color: number;
@@ -45,7 +45,7 @@ interface SaveData {
 
 function serializePC(pc: PC): SavedPC {
   return {
-    id: pc.id, name: pc.name, charClass: pc.charClass, level: pc.level,
+    id: pc.id, name: pc.name, charClass: pc.charClass, level: pc.level, xp: pc.xp,
     hp: pc.hp, maxHp: pc.maxHp, ac: pc.ac,
     stamina: pc.stamina, maxStamina: pc.maxStamina, skills: pc.skills,
     radius: pc.radius, color: pc.color,
@@ -64,6 +64,7 @@ function deserializePC(s: SavedPC): PC {
     bodyType: s.bodyType, skinColor: s.skinColor,
     primaryColor: s.primaryColor, secondaryColor: s.secondaryColor,
   });
+  pc.xp = s.xp ?? 0;
   pc.inventory = new Inventory();
   for (const id of s.itemIds) {
     const item = ALL_ITEMS.find((i: Item) => i.id === id);

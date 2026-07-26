@@ -43,10 +43,11 @@ export class OptionsScene extends BaseScene {
       fontSize: '28px', color: '#cc8844', fontStyle: 'bold', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    const toggles: Array<{ key: 'godMode' | 'autoEndTurn' | 'showGrid'; label: string }> = [
+    const toggles: Array<{ key: 'godMode' | 'autoEndTurn' | 'showGrid' | 'showCheatSkip'; label: string }> = [
       { key: 'godMode', label: 'GOD MODE' },
       { key: 'autoEndTurn', label: 'AUTO END TURN' },
       { key: 'showGrid', label: 'SHOW GRID' },
+      { key: 'showCheatSkip', label: 'SHOW CHEAT SKIP BUTTON IN COMBAT' },
     ];
 
     for (const toggle of toggles) {

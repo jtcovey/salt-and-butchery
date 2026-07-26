@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { Obstacle, GamePhase, CombatReturn } from '../types';
 import { WorldState } from '../core/WorldState';
+import { encounterXp, awardXp, type LevelUpResult } from '../data/leveling';
 import type { Action } from '../actions/Action';
 import { CoordinateSystem } from '../core/CoordinateSystem';
 import { MovementSystem } from '../systems/MovementSystem';
@@ -82,6 +83,12 @@ export class CombatScene extends BaseScene {
   private endText: Phaser.GameObjects.Text | null = null;
   private endBtn: UIButton | null = null;
 
+  private endSubText?: Phaser.GameObjects.Text;
+  private cheatBtn?: UIButton;
+  /** Enemy count when the fight began — XP shouldn't shrink as they die. */
+  private enemyCountAtStart = 0;
+  private xpAwarded = 0;
+  private levelUps: LevelUpResult[] = [];
   /** Location id this encounter belongs to; marked complete on victory. */
   private encounterId: string | null = null;
   private returnTo: CombatReturn = { scene: 'MenuScene' };
@@ -176,6 +183,11 @@ export class CombatScene extends BaseScene {
   }
 
   private finishSetup(): void {
+    // The one place every spawn route converges — level data, defaults, and the
+    // load-failure fallback all land here. Recording the roster size in buildUI
+    // banked 0, because loadLevel is async and buildUI runs before it resolves.
+    this.enemyCountAtStart = this.enemies.length;
+
     this.turns = new TurnSystem(this.party, this.enemies);
     this.ai = new AISystem(this.movement);
 
@@ -236,6 +248,17 @@ export class CombatScene extends BaseScene {
       // Combat's only additions to the shared bar: the turn-done tick and dimming.
       decoratePC: (pc) => pc.turnDone ? { suffix: ' ✓', alpha: 0.4 } : {},
     });
+
+    // Cheat: instant win. Sits directly under the top bar's 'O', same size, and
+    // only exists when the option is on — created here rather than in TopBar
+    // because TopBar is shared with the world map and this is combat-only.
+    if (GameOptions.showCheatSkip) {
+      this.cheatBtn = new UIButton(this, 0, 0, {
+        text: 'S', ...BUTTON_CHROME,
+        onClick: () => this.cheatSkip(),
+      });
+      this.cheatBtn.setDepth(10);
+    }
 
     this.panelGfx = this.add.graphics().setDepth(8);
     this.phaseText = this.add.text(0, 0, '', { fontSize: '14px', color: '#ffffff' }).setDepth(9);
@@ -800,6 +823,16 @@ export class CombatScene extends BaseScene {
 
   private drawUI(): void {
     this.topBar.layout();
+
+    if (this.cheatBtn) {
+      const barH = this.coords.canvasHeight * LAYOUT.topBar.height;
+      const size = Math.max(24, Math.round(barH * 0.55));
+      this.cheatBtn.setPosition(
+        Math.round(this.coords.canvasWidth - size / 2 - 4),
+        Math.round(barH + size / 2 + 4),
+      );
+      this.cheatBtn.resize(size, size, this.coords.fontSize(0.025));
+    }
     this.drawSidePanel();
     this.drawLog();
   }
@@ -971,6 +1004,16 @@ export class CombatScene extends BaseScene {
   /** Single victory path — reached from every kill that empties the field. */
   private onVictory(): void {
     if (this.encounterId) WorldState.markComplete(this.encounterId);
+
+    // XP is awarded once, here, on the single victory path — so it can't be
+    // double-granted by the several kill sites that can empty the field.
+    this.xpAwarded = encounterXp(this.enemyCountAtStart);
+    this.levelUps = awardXp(this.party, this.xpAwarded);
+    this.logMsg(`+${this.xpAwarded} XP`, undefined);
+    for (const up of this.levelUps) {
+      this.logMsg(`${up.pc.name} reaches level ${up.to}! ${up.gains.join(', ')}`, undefined);
+    }
+
     const dur = this.logMsg('★ VICTORY ★', 'victory');
     this.mode = 'select';
     this.activeAction = null;
@@ -985,7 +1028,22 @@ export class CombatScene extends BaseScene {
   }
 
   private showVictoryOverlay(): void {
-    this.showEndOverlay('★ VICTORY ★', '#ddcc44', 'BACK 2 WORLD', () => this.leaveCombat());
+    const lines = [`+${this.xpAwarded} XP`];
+    for (const up of this.levelUps) {
+      lines.push(`${up.pc.name} reached level ${up.to} — ${up.gains.join(', ')}`);
+    }
+    this.showEndOverlay('★ VICTORY ★', '#ddcc44', 'BACK 2 WORLD', () => this.leaveCombat(),
+      lines.join('\n'));
+  }
+
+  /** Cheat: wipe the field and take the normal victory path, XP and all. */
+  private cheatSkip(): void {
+    if (this.turns.phase === 'victory' || this.turns.phase === 'defeat') return;
+    for (const e of this.enemies) { e.hp = 0; e.dead = true; }
+    this.enemies = [];
+    this.logMsg('— skipped —', undefined);
+    this.redraw();
+    this.onVictory();
   }
 
   /**
@@ -1009,6 +1067,7 @@ export class CombatScene extends BaseScene {
     titleColor: string,
     buttonText: string,
     onClick: () => void,
+    subtitle = '',
   ): void {
     this.endGfx = this.add.graphics().setDepth(50);
 
@@ -1017,6 +1076,10 @@ export class CombatScene extends BaseScene {
       fontStyle: 'bold',
       fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(51);
+
+    this.endSubText = this.add.text(0, 0, subtitle, {
+      color: '#cfd6e6', fontFamily: 'monospace', align: 'center',
+    }).setOrigin(0.5, 0).setDepth(51).setVisible(subtitle !== '');
 
     this.endBtn = new UIButton(this, 0, 0, {
       text: buttonText,
@@ -1042,10 +1105,24 @@ export class CombatScene extends BaseScene {
     this.endGfx.fillRect(0, 0, w, h);
 
     this.endText
-      .setPosition(Math.round(w / 2), Math.round(h * 0.35))
+      .setPosition(Math.round(w / 2), Math.round(h * 0.33))
       .setFontSize(this.coords.fontSize(0.08));
 
-    this.endBtn.setPosition(Math.round(w / 2), Math.round(h * 0.55));
+    // The button sits BELOW the subtitle rather than at a fixed fraction — a
+    // full party levelling produces five lines and a fixed position buries the
+    // last one under the button.
+    let btnY = Math.round(h * 0.58);
+    if (this.endSubText) {
+      const subTop = Math.round(h * 0.44);
+      this.endSubText
+        .setPosition(Math.round(w / 2), subTop)
+        .setFontSize(this.coords.fontSize(0.024));
+      if (this.endSubText.text) {
+        btnY = Math.round(subTop + this.endSubText.height + h * 0.06);
+      }
+    }
+
+    this.endBtn.setPosition(Math.round(w / 2), btnY);
     this.endBtn.resize(
       Math.max(200, w * 0.2),
       Math.max(40, h * 0.06),
