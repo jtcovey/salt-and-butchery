@@ -1,5 +1,11 @@
 import Phaser from 'phaser';
-import type { EncounterData, Obstacle, GamePhase } from '../types';
+import type { Obstacle, GamePhase, CombatReturn, Vec2 } from '../types';
+import type { DungeonLevel } from '../types/dungeon';
+import { DialogPanel } from '../ui/DialogPanel';
+import { findTilePath } from '../core/Pathfinding';
+import { isTileIdPassable, TILE_TRACKS } from '../config/terrain';
+import { WorldState } from '../core/WorldState';
+import { encounterXp, awardXp, type LevelUpResult } from '../data/leveling';
 import type { Action } from '../actions/Action';
 import { CoordinateSystem } from '../core/CoordinateSystem';
 import { MovementSystem } from '../systems/MovementSystem';
@@ -11,18 +17,73 @@ import type { TileOverlay, SaltBody } from '../render/TerrainRenderer';
 import { UnitRenderer } from '../render/UnitRenderer';
 import { VFXRenderer } from '../render/VFXRenderer';
 import { RangeIndicator } from '../ui/RangeIndicator';
-import { UIButton } from '../ui/UIButton';
+import { UIButton, BUTTON_BACK, BUTTON_CHROME } from '../ui/UIButton';
+import { TopBar } from '../ui/TopBar';
 import { PC } from '../entities/PC';
 import { NPC } from '../entities/NPC';
 import { LAYOUT, UNIT_RADIUS, RANGED_RANGE, MELEE_RANGE } from '../config/constants';
 import { GameOptions } from '../config/GameOptions';
 import { SWORD, BOW } from '../data/items';
+import { spawnEnemy } from '../data/enemies';
 import { SFXSystem } from '../systems/SFXSystem';
 import type { SFXId } from '../systems/SFXSystem';
+import { BaseScene } from './BaseScene';
 
 type CombatMode = 'select' | 'move' | 'targeting';
 
-export class CombatScene extends Phaser.Scene {
+const DEFAULT_LEVEL = 'levels/TestMap1.json';
+
+/** Milliseconds per tile while walking a clicked path in explore mode. */
+const EXPLORE_STEP_MS = 100;
+/**
+ * Trail entries between one follower and the next.
+ *
+ * Not 1. Units are UNIT_RADIUS 0.6 across, so a pair on adjacent tile centres
+ * (1.0 apart) would overlap by 0.2 — and the party would drop into combat
+ * already interpenetrating, which is the exact spawn bug from the encounter
+ * generator. Two tiles apart is 2.0 > 1.2 and always clears.
+ */
+const TRAIL_SPACING = 2;
+/** Enough history for a full six-member party at TRAIL_SPACING, plus slack. */
+const MAX_TRAIL_LEN = 12;
+/**
+ * How close a party member must get before a dormant pack notices them, in
+ * tiles. Shorter than RANGED_RANGE (24) on purpose — archers should get their
+ * shots off as the fight opens rather than waking the room from across it.
+ */
+const ACTIVATION_RADIUS = 7;
+
+/**
+ * Morale, B's numbers: chance% = 100 − 20 × tiles from the death. Adjacent 80%,
+ * four tiles 20%, beyond that no roll. The two knobs live here so the curve can
+ * be tuned in one place.
+ */
+const MORALE_BASE = 100;
+const MORALE_FALLOFF_PER_TILE = 20;
+
+/** Per-enemy pause in the enemy phase for a normal-sized fight. */
+const ENEMY_PHASE_STEP_MS = 500;
+/** Rough ceiling on a whole enemy phase before the pause starts compressing. */
+const ENEMY_PHASE_BUDGET_MS = 5000;
+
+/**
+ * A pack that wakes as a unit. One group is exactly one engagement, which is
+ * what lets TurnSystem's "victory when the enemy array empties" keep meaning
+ * something on a map that holds forty enemies.
+ */
+interface EnemyGroup {
+  id: string;
+  members: NPC[];
+  activated: boolean;
+  /**
+   * Sealed behind a wall. Never drawn and never woken by proximity — with no
+   * fog of war, a visible pack sitting in a closed pocket would advertise the
+   * ambush before it happened.
+   */
+  hidden: boolean;
+}
+
+export class CombatScene extends BaseScene {
   private coords!: CoordinateSystem;
   private movement!: MovementSystem;
   private combat!: CombatSystem;
@@ -49,6 +110,10 @@ export class CombatScene extends Phaser.Scene {
   private log: string[] = [];
   private logScroll = 0;
   private animating = false;
+  /** False until loadLevel resolves and finishSetup wires TurnSystem/AISystem. */
+  private ready = false;
+  private levelFile = DEFAULT_LEVEL;
+  private levelData: { terrainGrid: number[][]; partySpawn: {x:number;y:number}[]; enemies: {type:string;x:number;y:number}[] } | null = null;
 
   // Undo state
   private undoSnapshot: {
@@ -59,23 +124,80 @@ export class CombatScene extends Phaser.Scene {
   } | null = null;
 
   // UI elements
+  private topBar!: TopBar;
   private panelGfx!: Phaser.GameObjects.Graphics;
-  private topBarGfx!: Phaser.GameObjects.Graphics;
   private phaseText!: Phaser.GameObjects.Text;
   private logText!: Phaser.GameObjects.Text;
   private logMask!: Phaser.GameObjects.Graphics;
-  private hpTexts: Phaser.GameObjects.Text[] = [];
   private actionBtns: UIButton[] = [];
   private endTurnBtn!: UIButton;
   private moveInfoText!: Phaser.GameObjects.Text;
   private undoBtn!: UIButton;
-  private optionsBtn!: UIButton;
-  private inventoryBtn!: UIButton;
+  /** Walk out of a dungeon. Only built for a dungeon, only shown while exploring. */
+  private leaveBtn?: UIButton;
+
+  // End-of-combat overlay (victory or defeat) — kept for re-layout on resize
+  private endGfx: Phaser.GameObjects.Graphics | null = null;
+  private endText: Phaser.GameObjects.Text | null = null;
+  private endBtn: UIButton | null = null;
+
+  private endSubText?: Phaser.GameObjects.Text;
+  private cheatBtn?: UIButton;
+  /** Enemy count when the fight began — XP shouldn't shrink as they die. */
+  private enemyCountAtStart = 0;
+  private xpAwarded = 0;
+  private levelUps: LevelUpResult[] = [];
+  /** Location id this encounter belongs to; marked complete on victory. */
+  private encounterId: string | null = null;
+  private returnTo: CombatReturn = { scene: 'MenuScene' };
+
+  // ── Dungeon / explore mode ────────────────────────────────────────────────
+  /** Non-null for a multi-encounter level. Null means a plain one-fight map. */
+  private dungeon: DungeonLevel | null = null;
+  /**
+   * Every pack in the dungeon, dormant until the party is seen. `this.enemies`
+   * holds only the group currently engaged — that's what makes TurnSystem's
+   * "victory when the array empties" mean "this engagement is over".
+   */
+  private groups: EnemyGroup[] = [];
+  /** Rooms whose description has already fired. Descriptions are one-shot. */
+  private seenRooms = new Set<string>();
+  /** Leader's recent tile centres, most recent first. Followers walk it. */
+  private exploreTrail: Vec2[] = [];
+  private exploreQueue: Vec2[] = [];
+  private exploreEvent: Phaser.Time.TimerEvent | null = null;
+  /** Running XP total across the dungeon's engagements, for the final overlay. */
+  private dungeonXp = 0;
+  /** One-shot latch so the wall can't come down twice. */
+  private ambushSprung = false;
+  private dialog!: DialogPanel;
 
   constructor() { super({ key: 'CombatScene' }); }
 
-  init(data?: { encounter?: EncounterData; party?: PC[] }) {
+  init(data?: {
+    party?: PC[];
+    levelFile?: string;
+    /** Pre-built level, used by random encounters instead of fetching a file. */
+    levelData?: { terrainGrid: number[][]; partySpawn: {x:number;y:number}[]; enemies: {type:string;x:number;y:number}[] };
+    encounterId?: string;
+    returnTo?: CombatReturn;
+    /** Multi-encounter level. Starts in explore mode instead of a turn. */
+    dungeon?: DungeonLevel;
+  }) {
     if (data?.party) this.party = data.party;
+    this.levelFile = data?.levelFile ?? DEFAULT_LEVEL;
+    this.levelData = data?.levelData ?? null;
+    this.encounterId = data?.encounterId ?? null;
+    this.returnTo = data?.returnTo ?? { scene: 'MenuScene' };
+    this.dungeon = data?.dungeon ?? null;
+
+    // Phaser reuses the Scene INSTANCE, so every field that survives a
+    // scene.start() has to be reset here or it leaks into the next run.
+    this.groups = [];
+    this.seenRooms = new Set();
+    this.exploreTrail = [];
+    this.dungeonXp = 0;
+    this.ambushSprung = false;
   }
 
   create() {
@@ -92,20 +214,37 @@ export class CombatScene extends Phaser.Scene {
 
     this.buildUI();
     this.setupInput();
+    this.watchReflow();
 
-    this.events.on('resume', () => this.redraw());
+    // The explore walk timer must not outlive the scene.
+    this.events.once('shutdown', () => this.stopExploreWalk());
 
-    this.loadLevel('levels/TestMap1.json');
+    this.loadLevel(this.levelFile);
+  }
+
+  protected override reflow(): void {
+    this.redraw();
+    this.layoutEndOverlay();
   }
 
   private async loadLevel(path: string): Promise<void> {
+    if (this.dungeon) {
+      this.loadDungeon(this.dungeon);
+      this.finishSetup();
+      return;
+    }
+
     try {
-      const resp = await fetch(path);
-      const data = await resp.json();
+      // A generated encounter arrives already built; only fetch when it didn't.
+      const data = this.levelData ?? await (await fetch(path)).json();
 
       if (data.terrainGrid) {
         this.terrainGrid = data.terrainGrid;
         this.movement.setTerrainGrid(data.terrainGrid);
+        // Size the arena to the actual grid rather than leaving it at the 60x40 default.
+        if (data.terrainGrid.length > 0) {
+          this.coords.setArena(data.terrainGrid[0].length, data.terrainGrid.length);
+        }
       }
 
       if (data.partySpawn && this.party.length > 0) {
@@ -131,31 +270,348 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private buildEnemiesFromData(spawns: Array<{ type: string; x: number; y: number; name?: string }>): void {
-    this.enemies = spawns.map((s, i) => {
-      const isArcher = s.type === 'skeleton_archer';
-      const e = new NPC({
-        id: `e${i}`, name: s.name || `Enemy-${i}`,
-        hp: 1, maxHp: 1, ac: 3, strength: 0,
-        x: s.x, y: s.y, radius: UNIT_RADIUS,
-        color: isArcher ? 0xcc4488 : 0xcc6622,
-        label: isArcher ? 'A' : undefined,
-      });
-      e.inventory.items.push(isArcher ? BOW : SWORD);
-      return e;
+    // Replaces this array wholesale, which is only safe because TurnSystem
+    // isn't constructed until finishSetup(). Anything that empties the roster
+    // *after* that point must splice in place — see cheatSkip.
+    this.enemies = spawns.map((s, i) => spawnEnemy(s.type, s.x, s.y, `e${i}`, s.name));
+  }
+
+  /**
+   * A dungeon lands its whole roster in `groups`, dormant, and leaves
+   * `this.enemies` empty. Nothing is engaged until a pack notices the party.
+   */
+  private loadDungeon(d: DungeonLevel): void {
+    this.terrainGrid = d.terrainGrid;
+    this.movement.setTerrainGrid(d.terrainGrid);
+    if (d.terrainGrid.length > 0) {
+      this.coords.setArena(d.terrainGrid[0].length, d.terrainGrid.length);
+    }
+
+    if (this.party.length === 0) this.buildDefaultParty();
+    for (let i = 0; i < this.party.length; i++) {
+      const spot = d.partySpawn[Math.min(i, d.partySpawn.length - 1)];
+      if (spot) { this.party[i].x = spot.x; this.party[i].y = spot.y; }
+    }
+
+    const byGroup = new Map<string, NPC[]>();
+    d.enemies.forEach((s, i) => {
+      const npc = spawnEnemy(s.type, s.x, s.y, `e${i}`);
+      const list = byGroup.get(s.group);
+      if (list) list.push(npc); else byGroup.set(s.group, [npc]);
     });
+    this.groups = [...byGroup.entries()].map(([id, members]) => ({
+      id, members, activated: false, hidden: id === d.ambush?.group,
+    }));
+    this.ambushSprung = false;
+
+    // Empty on purpose — see the field comment on `groups`.
+    this.enemies = [];
+    this.exploreTrail = [];
   }
 
   private finishSetup(): void {
+    // The one place every spawn route converges — level data, defaults, and the
+    // load-failure fallback all land here. Recording the roster size in buildUI
+    // banked 0, because loadLevel is async and buildUI runs before it resolves.
+    this.enemyCountAtStart = this.enemies.length;
+
     this.turns = new TurnSystem(this.party, this.enemies);
     this.ai = new AISystem(this.movement);
 
     this.turns.onPhaseChange = (_phase) => this.onPhaseChange(_phase);
     this.turns.onEnemyPhaseStart = () => this.runEnemyPhase();
 
+    this.ready = true;
+
+    if (this.dungeon) {
+      this.logMsg(`—— ${this.dungeon.name} ——`);
+      this.beginExplore();
+      return;
+    }
+
     this.turns.beginPlayerTurn();
     this.logMsg(`—— Turn 1: Player Phase ——`);
     this.mode = 'move';
     this.redraw();
+  }
+
+  // ===========================================================================
+  // Explore mode — out-of-combat dungeon movement
+  // ===========================================================================
+
+  /** The party member the player actually steers. Others walk his trail. */
+  private get leader(): PC | null {
+    return this.party.find(p => !p.dead) ?? this.party[0] ?? null;
+  }
+
+  /** Active + dormant, minus anything still sealed behind a wall. */
+  private visibleEnemies(): NPC[] {
+    if (!this.dungeon) return this.enemies;
+    const dormant = this.groups
+      .filter(g => !g.activated && !g.hidden)
+      .flatMap(g => g.members);
+    return [...this.enemies, ...dormant];
+  }
+
+  /**
+   * Brings the wall down and puts the hidden pack into the live fight.
+   *
+   * Terrain is mutated in place: the marked tiles become floor, MovementSystem
+   * is re-pointed at the grid so pathing and line of sight both agree with what
+   * is now drawn, and the pack joins the roster mid-engagement.
+   */
+  private springAmbush(): void {
+    const amb = this.dungeon?.ambush;
+    if (!amb || this.ambushSprung || !this.terrainGrid) return;
+    const group = this.groups.find(g => g.id === amb.group);
+    if (!group) return;
+
+    this.ambushSprung = true;
+    group.hidden = false;
+    group.activated = true;
+
+    for (const t of amb.wallTiles) {
+      const col = Math.floor(t.x), row = Math.floor(t.y);
+      if (this.inGrid(col, row)) this.terrainGrid[row][col] = TILE_TRACKS;
+    }
+    this.movement.setTerrainGrid(this.terrainGrid);
+
+    // Splice, never reassign — TurnSystem holds this array by reference.
+    this.enemies.push(...group.members);
+    this.enemyCountAtStart += group.members.length;
+
+    this.logMsg('— the wall behind you comes apart —', 'hit');
+    this.logMsg(`${group.members.length} goblins pour through!`);
+    this.redraw();
+  }
+
+  /** Called whenever a player turn begins; springs the ambush on its turn. */
+  private maybeSpringAmbush(): void {
+    const amb = this.dungeon?.ambush;
+    if (!amb || this.ambushSprung) return;
+    const trigger = this.groups.find(g => g.id === amb.triggerGroup);
+    if (!trigger?.activated) return;
+    if (this.turns.turn < amb.afterTurns) return;
+    this.springAmbush();
+  }
+
+  private beginExplore(): void {
+    this.mode = 'select';
+    this.activeAction = null;
+    this.stopExploreWalk();
+
+    // Trail starts empty: until the leader has actually walked somewhere there
+    // is no ground behind him to stand on, and followers keep the positions
+    // they already hold. Seeding it with the leader's own tile instead would
+    // stack the whole party on one point the moment a dungeon opens.
+    this.exploreTrail = [];
+
+    this.turns.beginExplore();
+    this.redraw();
+  }
+
+  /**
+   * Followers stand on the ground the leader covered, TRAIL_SPACING entries
+   * apart. A follower whose slot the leader hasn't reached yet simply doesn't
+   * move — so the party files out of its starting formation as the leader
+   * walks, rather than teleporting into a column on the first step.
+   */
+  private placeFollowers(): void {
+    const lead = this.leader;
+    if (!lead) return;
+    const others = this.party.filter(p => p !== lead);
+    others.forEach((pc, i) => {
+      const idx = (i + 1) * TRAIL_SPACING - 1;
+      if (idx >= this.exploreTrail.length) return;
+      const spot = this.exploreTrail[idx];
+      pc.x = spot.x;
+      pc.y = spot.y;
+    });
+  }
+
+  private handleExploreClick(worldPos: Vec2): void {
+    const lead = this.leader;
+    if (!lead || !this.terrainGrid) return;
+
+    const goalCol = Math.floor(worldPos.x);
+    const goalRow = Math.floor(worldPos.y);
+    if (!this.inGrid(goalCol, goalRow)) return;
+    if (!isTileIdPassable(this.terrainGrid[goalRow][goalCol])) {
+      this.logMsg('Solid rock.');
+      return;
+    }
+
+    const path = findTilePath(
+      this.terrainGrid,
+      { x: lead.x, y: lead.y },
+      { x: goalCol + 0.5, y: goalRow + 0.5 },
+    );
+    if (!path || path.length === 0) {
+      this.logMsg('No way through.');
+      return;
+    }
+
+    this.stopExploreWalk();
+    this.exploreQueue = path;
+    this.exploreEvent = this.time.addEvent({
+      delay: EXPLORE_STEP_MS,
+      loop: true,
+      callback: () => this.exploreStep(),
+    });
+  }
+
+  private stopExploreWalk(): void {
+    this.exploreEvent?.remove();
+    this.exploreEvent = null;
+    this.exploreQueue = [];
+  }
+
+  /**
+   * One tile of travel. Checks for a room description and then for a pack that
+   * can see the party — either one halts the walk, so the party never blunders
+   * through a trigger because the timer was mid-path.
+   */
+  private exploreStep(): void {
+    const lead = this.leader;
+    if (!lead || this.turns.phase !== 'explore') { this.stopExploreWalk(); return; }
+
+    const next = this.exploreQueue.shift();
+    if (!next) { this.stopExploreWalk(); this.redraw(); return; }
+
+    this.exploreTrail.unshift({ x: lead.x, y: lead.y });
+    if (this.exploreTrail.length > MAX_TRAIL_LEN) this.exploreTrail.length = MAX_TRAIL_LEN;
+    lead.x = next.x;
+    lead.y = next.y;
+    this.placeFollowers();
+
+    if (this.exploreQueue.length === 0) this.stopExploreWalk();
+    this.redraw();
+
+    if (this.checkRoomEntry()) { this.stopExploreWalk(); return; }
+    this.checkActivation();
+  }
+
+  /** Fires a room's description the first time the leader stands inside it. */
+  private checkRoomEntry(): boolean {
+    const lead = this.leader;
+    if (!lead || !this.dungeon) return false;
+
+    for (const room of this.dungeon.rooms) {
+      if (!room.description || this.seenRooms.has(room.id)) continue;
+      const inside =
+        lead.x >= room.x && lead.x < room.x + room.w &&
+        lead.y >= room.y && lead.y < room.y + room.h;
+      if (!inside) continue;
+
+      this.seenRooms.add(room.id);
+      this.dialog.open(room.id, room.description, ['OK'], () => {
+        this.dialog.close();
+        this.redraw();
+      });
+      // The caller already redrew before this ran, so without a second pass the
+      // panel is open in state and invisible on screen.
+      this.redraw();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Wakes the first pack that can both reach and see a living party member.
+   *
+   * Line of sight matters: without it a group one wall away wakes through solid
+   * rock, and the whole point of a corridor is that what's around the corner
+   * hasn't noticed you yet. This is also why the dungeon needs no fog of war —
+   * the trigger is proximity, not visibility, so lighting can land later
+   * without changing when fights start.
+   */
+  private checkActivation(): void {
+    if (!this.dungeon || this.turns.phase !== 'explore') return;
+    const alive = this.party.filter(p => !p.dead);
+    if (alive.length === 0) return;
+
+    for (const group of this.groups) {
+      if (group.activated || group.hidden) continue;
+      const spotted = group.members.some(e =>
+        alive.some(pc =>
+          this.movement.isInRange(e, pc, ACTIVATION_RADIUS) &&
+          this.movement.hasLineOfSight(e, pc)));
+      if (spotted) { this.engage(group); return; }
+    }
+  }
+
+  /** Splice a woken pack into the live roster and open a normal fight. */
+  private engage(group: EnemyGroup): void {
+    this.stopExploreWalk();
+    group.activated = true;
+
+    // MUST splice, not reassign — TurnSystem holds a reference to this array.
+    this.enemies.push(...group.members);
+    this.enemyCountAtStart = group.members.length;
+
+    this.logMsg('— you are seen —', 'victory');
+    this.mode = 'move';
+    this.turns.resetTurns();
+    this.turns.beginPlayerTurn();
+    this.logMsg('—— Turn 1: Player Phase ——');
+    this.redraw();
+  }
+
+  /**
+   * An engagement cleared with more of the dungeon left. Pays out, patches the
+   * party up and hands control back to explore mode.
+   *
+   * Full heal between fights is B's call: the three rooms are separate tactical
+   * problems rather than one attrition run, so the nest's difficulty is set by
+   * its hardest single room.
+   */
+  private endEngagement(): void {
+    const xp = encounterXp(this.enemyCountAtStart);
+    this.dungeonXp += xp;
+    const levelUps = awardXp(this.party, xp);
+    this.logMsg(`+${xp} XP`);
+    for (const up of levelUps) {
+      this.logMsg(`${up.pc.name} reaches level ${up.to}! ${up.gains.join(', ')}`);
+    }
+
+    for (const pc of this.party) {
+      pc.hp = pc.maxHp;
+      pc.stamina = pc.maxStamina;
+      pc.dead = false;
+      pc.status = [];
+      pc.turnDone = false;
+    }
+
+    this.logMsg('— the way is clear —');
+    this.topBar.layout();
+    this.beginExplore();
+  }
+
+  /** True while the dungeon still holds a pack that hasn't been fought. */
+  private hasDormantGroups(): boolean {
+    return this.groups.some(g => !g.activated);
+  }
+
+  /**
+   * Walk out mid-dungeon. Nothing is persisted, so the nest repopulates on the
+   * next visit — B's choice, accepting that the first pack is farmable in
+   * exchange for no dungeon state to track. XP already earned is kept, since
+   * it went onto the characters as each engagement resolved.
+   */
+  private leaveDungeon(): void {
+    this.stopExploreWalk();
+    for (const pc of this.party) {
+      pc.hp = pc.maxHp;
+      pc.stamina = pc.maxStamina;
+      pc.dead = false;
+      pc.status = [];
+    }
+    this.leaveCombat();
+  }
+
+  private inGrid(col: number, row: number): boolean {
+    const g = this.terrainGrid;
+    return !!g && row >= 0 && row < g.length && col >= 0 && col < g[0].length;
   }
 
   private buildDefaultParty(): void {
@@ -184,38 +640,62 @@ export class CombatScene extends Phaser.Scene {
     const archers: Array<[number, number, string]> = [[55, 14, 'Bow-1'], [55, 26, 'Bow-2']];
     let idx = 0;
     this.enemies = [
-      ...melee.map(([x, y, name]) => {
-        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc6622 });
-        e.inventory.items.push(SWORD);
-        return e;
-      }),
-      ...archers.map(([x, y, name]) => {
-        const e = new NPC({ id: `e${idx++}`, name, hp: 1, maxHp: 1, ac: 3, strength: 0, x, y, radius: UNIT_RADIUS, color: 0xcc4488, label: 'A' });
-        e.inventory.items.push(BOW);
-        return e;
-      }),
+      ...melee.map(([x, y, name]) => spawnEnemy('skeleton', x, y, `e${idx++}`, name)),
+      ...archers.map(([x, y, name]) => spawnEnemy('skeleton_archer', x, y, `e${idx++}`, name)),
     ];
   }
 
   private buildUI(): void {
-    this.topBarGfx = this.add.graphics().setDepth(8);
+    // Phaser reuses the Scene INSTANCE across scene.start(), so these fields
+    // outlive the GameObjects they hold. Returning to combat a second time left
+    // destroyed buttons in the pool and drawSidePanel died on a null canvas.
+    this.actionBtns = [];
+
+    // Rebuilt rather than reset, for the same reason — the old panel's
+    // GameObjects don't survive a scene.start().
+    this.dialog = new DialogPanel(this, this.coords);
+
+    this.leaveBtn = undefined;
+    if (this.dungeon) {
+      this.leaveBtn = new UIButton(this, 0, 0, {
+        text: 'LEAVE DUNGEON', ...BUTTON_BACK,
+        onClick: () => this.leaveDungeon(),
+      });
+      // Depth 10 like every other side-panel button — panelGfx is depth 8 and
+      // paints straight over anything left at the default.
+      this.leaveBtn.setDepth(10).setVisible(false);
+    }
+
+    this.topBar = new TopBar(this, this.coords, {
+      party: this.party,
+      onOptions: () => this.openOptions(),
+      onInventory: () => this.openInventory(),
+      // Combat's only additions to the shared bar: the turn-done tick and dimming.
+      decoratePC: (pc) => pc.turnDone ? { suffix: ' ✓', alpha: 0.4 } : {},
+    });
+
+    // Cheat: instant win. Sits directly under the top bar's 'O', same size, and
+    // only exists when the option is on — created here rather than in TopBar
+    // because TopBar is shared with the world map and this is combat-only.
+    if (GameOptions.showCheatSkip) {
+      this.cheatBtn = new UIButton(this, 0, 0, {
+        text: 'S', ...BUTTON_CHROME,
+        onClick: () => this.cheatSkip(),
+      });
+      this.cheatBtn.setDepth(10);
+    }
+
     this.panelGfx = this.add.graphics().setDepth(8);
     this.phaseText = this.add.text(0, 0, '', { fontSize: '14px', color: '#ffffff' }).setDepth(9);
     this.logText = this.add.text(0, 0, '', { fontSize: '10px', color: '#bbbbbb', wordWrap: { width: 200 } }).setDepth(9);
     this.logMask = this.add.graphics().setDepth(9);
     this.moveInfoText = this.add.text(0, 0, '', { fontSize: '10px', color: '#66aa77' }).setDepth(9);
 
-    for (let i = 0; i < 6; i++) {
-      this.hpTexts.push(this.add.text(0, 0, '', { fontSize: '10px', color: '#ccc' }).setDepth(9));
-    }
-
     for (let i = 0; i < 5; i++) {
       const idx = i;
       const btn = new UIButton(this, 0, 0, {
         text: '', width: 110, height: 26, fontSize: 11,
-        bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-        borderColor: 0x334466, borderHoverColor: 0x5588cc,
-        textColor: '#aabbff', textHoverColor: '#ffffff',
+        ...BUTTON_CHROME,
         onClick: () => this.handleActionButton(idx),
       });
       btn.setDepth(10).setVisible(false);
@@ -224,9 +704,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.endTurnBtn = new UIButton(this, 0, 0, {
       text: 'END TURN', width: 110, height: 28, fontSize: 11,
-      bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
-      borderColor: 0x442222, borderHoverColor: 0x884444,
-      textColor: '#cc8844', textHoverColor: '#ffaa66',
+      ...BUTTON_BACK,
       onClick: () => this.endCurrentTurn(),
     });
     this.endTurnBtn.setDepth(10);
@@ -239,32 +717,25 @@ export class CombatScene extends Phaser.Scene {
       onClick: () => this.undoMove(),
     });
     this.undoBtn.setDepth(10).setVisible(false);
-
-    this.inventoryBtn = new UIButton(this, 0, 0, {
-      text: 'INVENTORY', width: 160, height: 32, fontSize: 11,
-      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-      borderColor: 0x334466, borderHoverColor: 0x5588cc,
-      textColor: '#aabbff', textHoverColor: '#ffffff',
-      onClick: () => this.openInventory(),
-    });
-    this.inventoryBtn.setDepth(10);
-
-    this.optionsBtn = new UIButton(this, 0, 0, {
-      text: 'O', width: 32, height: 32, fontSize: 14,
-      bgColor: 0x111128, hoverColor: 0x1a1a44, pressedColor: 0x222266,
-      borderColor: 0x334466, borderHoverColor: 0x5588cc,
-      textColor: '#aabbff', textHoverColor: '#ffffff',
-      onClick: () => this.openOptions(),
-    });
-    this.optionsBtn.setDepth(10);
   }
 
   private setupInput(): void {
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.animating || this.turns.phase !== 'player') return;
+      if (!this.ready || this.animating) return;
+      if (this.turns.phase !== 'player' && this.turns.phase !== 'explore') return;
+      // Buttons don't stop propagation; without this a click on one would also
+      // fall through to the battlefield. Currently safe by geometry alone.
+      if (this.input.hitTestPointer(pointer).length > 0) return;
       const worldPos = this.coords.screenToWorld(pointer.x, pointer.y);
       const inGame = this.coords.isInGameArea(pointer.x, pointer.y);
       if (!inGame) return;
+
+      if (this.turns.phase === 'explore') {
+        // A room description is modal — reading it shouldn't also order a march.
+        if (this.dialog.isOpen) return;
+        this.handleExploreClick(worldPos);
+        return;
+      }
 
       if (this.mode === 'targeting') {
         this.handleTargetClick(worldPos);
@@ -277,6 +748,7 @@ export class CombatScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (!this.ready) return;
       if (this.mode !== 'targeting' || !this.activeAction || this.activeAction.target !== 'cone') return;
       const pc = this.turns.selectedPC;
       if (!pc) return;
@@ -291,7 +763,6 @@ export class CombatScene extends Phaser.Scene {
       this.redraw();
     });
     this.input.keyboard!.on('keydown-I', () => this.openInventory());
-    this.scale.on('resize', () => this.redraw());
 
     // Log scrolling via mouse wheel over the panel
     this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _dx: number, _dy: number, dz: number) => {
@@ -302,7 +773,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private endCurrentTurn(): void {
-    if (this.animating || this.turns.phase !== 'player') return;
+    if (!this.ready || this.animating || this.turns.phase !== 'player') return;
     const pc = this.turns.selectedPC;
     if (!pc || pc.turnDone) return;
     this.logMsg(`${pc.name} ends turn.`);
@@ -536,7 +1007,7 @@ export class CombatScene extends Phaser.Scene {
       }
     }
 
-    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.onVictory(); return; }
     this.mode = 'move';
     this.activeAction = null;
     this.checkAutoEndTurn(pc);
@@ -582,7 +1053,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.attacksRemaining--;
 
-    if (this.turns.checkVictory()) { this.logMsg('★ VICTORY ★', 'victory'); this.mode = 'select'; this.activeAction = null; this.redraw(); return; }
+    if (this.turns.checkVictory()) { this.onVictory(); return; }
 
     if (this.attacksRemaining > 0 && this.enemies.length > 0) {
       this.logMsg(`  (${this.attacksRemaining} shot${this.attacksRemaining > 1 ? 's' : ''} remaining)`);
@@ -684,6 +1155,47 @@ export class CombatScene extends Phaser.Scene {
   private killEnemy(enemy: NPC): void {
     const idx = this.enemies.indexOf(enemy);
     if (idx >= 0) this.enemies.splice(idx, 1);
+    this.checkMorale(enemy);
+  }
+
+  /**
+   * Watching a companion die. Every surviving enemy that *can* break rolls
+   * against how close it was to the killing:
+   *
+   *     chance% = 100 − 20 × distance in tiles
+   *
+   * so adjacent is 80%, four tiles out is 20%, and beyond that nothing. B's
+   * numbers, unchanged.
+   *
+   * Only 'breaks' types roll. Undead never do, and that isn't a balance
+   * decision — `S&B Player's Glossary.md:105` calls them "mere slaves to their
+   * creators will" with the vaguest hints of cognition. There's no mind there
+   * to panic. Goblins carry the Faefolk's gregarious nature "but twisted", and
+   * a social creature is exactly what breaks when its friend dies beside it.
+   *
+   * The shaman is 'steady' for the same reason a sergeant is, which quietly
+   * makes him the right first target in the boss room: kill him and nothing
+   * left in the room is holding.
+   */
+  private checkMorale(killed: NPC): void {
+    let routed = 0;
+    for (const e of this.enemies) {
+      if (e.morale !== 'breaks' || e.fleeTurns > 0) continue;
+
+      // Rounded to whole tiles before the maths. Units live at float positions,
+      // so two of them standing shoulder to shoulder are 1.2 apart, which would
+      // read as 76% — B specified 80% adjacent, and he's thinking in tiles.
+      const tiles = Math.max(1, Math.round(this.movement.distance(e, killed)));
+      const chance = MORALE_BASE - MORALE_FALLOFF_PER_TILE * tiles;
+      if (chance <= 0) continue;
+      if (Math.random() * 100 >= chance) continue;
+
+      e.fleeTurns = 1 + Math.floor(Math.random() * 3); // d3
+      routed++;
+    }
+    if (routed > 0) {
+      this.logMsg(`${routed} ${routed === 1 ? 'breaks' : 'break'} and runs!`);
+    }
   }
 
   private runEnemyPhase(): void {
@@ -691,8 +1203,22 @@ export class CombatScene extends Phaser.Scene {
     this.animating = true;
     let delay = 0;
 
+    /**
+     * Per-enemy pacing, scaled so a big room doesn't stall.
+     *
+     * A flat 500ms reads fine for the five-skeleton fights the game had, but
+     * the nest's boss room holds 21 — that's 10.5 seconds of watching per turn.
+     * (Measured: deciding actions for the whole roster costs about 1ms, so this
+     * delay is the entire cost, not the AI.) Small fights keep their old feel;
+     * large ones compress to fit roughly ENEMY_PHASE_BUDGET_MS.
+     */
+    const step = Math.min(
+      ENEMY_PHASE_STEP_MS,
+      Math.max(90, ENEMY_PHASE_BUDGET_MS / Math.max(1, this.enemies.length)),
+    );
+
     this.enemies.forEach((e, i) => {
-      delay += 500;
+      delay += step;
       this.time.delayedCall(delay, () => {
         const actions = this.ai.decideActions(e, this.party, this.obstacles);
         for (const action of actions) {
@@ -751,12 +1277,19 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private onPhaseChange(_phase: GamePhase): void {
+    if (_phase === 'player') this.maybeSpringAmbush();
     this.redraw();
   }
 
   private redraw(): void {
+    // TurnSystem doesn't exist until finishSetup; a resize mid-load would throw.
+    if (!this.ready) return;
+
     this.terrain.draw(this.obstacles, this.terrainGrid ?? undefined, this.tileOverlays, this.saltBodies);
-    this.unitRenderer.draw(this.party, this.enemies, this.turns.selectedPC?.id ?? null);
+    // Dormant packs are drawn too. There's no fog of war, so the player can see
+    // what's ahead and choose when to walk into it — that's the whole tactical
+    // content of explore mode.
+    this.unitRenderer.draw(this.party, this.visibleEnemies(), this.turns.selectedPC?.id ?? null);
 
     this.rangeIndicator.clear();
     const pc = this.turns.selectedPC;
@@ -781,46 +1314,61 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private drawUI(): void {
+    this.topBar.layout();
+    this.dialog.layout(this.coords.regionPixels(LAYOUT.gameArea));
+
+    if (this.cheatBtn) {
+      const barH = this.coords.canvasHeight * LAYOUT.topBar.height;
+      const size = Math.max(24, Math.round(barH * 0.55));
+      this.cheatBtn.setPosition(
+        Math.round(this.coords.canvasWidth - size / 2 - 4),
+        Math.round(barH + size / 2 + 4),
+      );
+      this.cheatBtn.resize(size, size, this.coords.fontSize(0.025));
+    }
+    this.drawSidePanel();
+    this.drawLog();
+  }
+
+  /**
+   * Height of one action button. Shared with drawLog() so the log's top edge
+   * lands flush under the button stack — these were computed independently
+   * from different bases and disagreed.
+   */
+  private actionButtonHeight(): number {
+    return Math.max(22, this.coords.canvasHeight * 0.032);
+  }
+
+  private drawSidePanel(): void {
     const h = this.coords.canvasHeight;
-    const w = this.coords.canvasWidth;
-    const topBar = this.coords.regionPixels(LAYOUT.topBar);
     const panel = this.coords.regionPixels(LAYOUT.sidePanel);
 
-    // Top bar
-    this.topBarGfx.clear();
-    this.topBarGfx.fillStyle(0x080814, 0.95);
-    this.topBarGfx.fillRect(topBar.x, topBar.y, topBar.w, topBar.h);
-    this.topBarGfx.lineStyle(1, 0x334466);
-    this.topBarGfx.lineBetween(0, topBar.h, w, topBar.h);
-
-    // Party HP in top bar
-    this.party.forEach((c, i) => {
-      if (!this.hpTexts[i]) return;
-      const colHex = '#' + c.color.toString(16).padStart(6, '0');
-      const fontSize = this.coords.fontSize(0.018);
-      const doneMarker = c.turnDone && !c.dead && !c.status.includes('beaten') ? ' ✓' : '';
-      this.hpTexts[i].setPosition(topBar.x + 12 + i * (topBar.w / 6), topBar.h / 2)
-        .setOrigin(0, 0.5)
-        .setText(`${c.name} ${c.hp}/${c.maxHp}${doneMarker}`)
-        .setColor(colHex)
-        .setFontSize(fontSize)
-        .setAlpha(c.dead ? 0.3 : c.status.includes('beaten') ? 0.5 : c.turnDone ? 0.4 : 1);
-    });
-
-    // Side panel
     this.panelGfx.clear();
     this.panelGfx.fillStyle(0x080814, 0.95);
     this.panelGfx.fillRect(panel.x, panel.y, panel.w, panel.h);
     this.panelGfx.lineStyle(1, 0x334466);
     this.panelGfx.lineBetween(panel.x, panel.y, panel.x, panel.y + panel.h);
 
+    const exploring = this.turns.phase === 'explore';
+
     // Phase text
-    const phaseLabel = this.turns.phase === 'victory' ? '★ VICTORY ★' : this.turns.phase === 'defeat' ? '✗ DEFEAT' : `Turn ${this.turns.turn} — ${this.turns.phase.toUpperCase()}`;
+    const phaseLabel =
+      this.turns.phase === 'victory' ? '★ VICTORY ★'
+      : this.turns.phase === 'defeat' ? '✗ DEFEAT'
+      : exploring ? 'EXPLORING'
+      : `Turn ${this.turns.turn} — ${this.turns.phase.toUpperCase()}`;
     this.phaseText.setPosition(panel.x + 8, panel.y + 8).setText(phaseLabel).setFontSize(this.coords.fontSize(0.02));
 
-    // Movement / stamina info for selected PC
-    const pc = this.turns.selectedPC;
-    if (pc) {
+    // Movement / stamina info for selected PC. Explore has no turns, so there's
+    // no per-turn budget to report — the party walks as far as it likes.
+    const pc = exploring ? null : this.turns.selectedPC;
+    if (exploring) {
+      const packs = this.groups.filter(g => !g.activated).length;
+      this.moveInfoText.setPosition(panel.x + 8, panel.y + h * 0.05)
+        .setText(packs > 0 ? `Click to move.  ${packs} group${packs === 1 ? '' : 's'} left.` : 'Click to move.')
+        .setFontSize(this.coords.fontSize(0.014))
+        .setVisible(true);
+    } else if (pc) {
       const freeLeft = Math.max(0, 8 - pc.movesUsedThisTurn);
       this.moveInfoText.setPosition(panel.x + 8, panel.y + h * 0.05)
         .setText(`Move: ${freeLeft.toFixed(1)} free  |  Stamina: ${pc.stamina}/${pc.maxStamina}`)
@@ -833,7 +1381,7 @@ export class CombatScene extends Phaser.Scene {
     // Action buttons
     const actions = pc ? pc.availableActions({ party: this.party, enemies: this.enemies, obstacles: this.obstacles }) : [];
     const btnW = Math.max(90, panel.w * 0.85);
-    const btnH = Math.max(22, h * 0.032);
+    const btnH = this.actionButtonHeight();
     const btnFontSize = this.coords.fontSize(0.015);
     const btnStartY = panel.y + h * 0.09 + btnH * 0.5;
     const btnGap = btnH + 4;
@@ -864,7 +1412,7 @@ export class CombatScene extends Phaser.Scene {
     this.endTurnBtn.setEnabled(!!pc && !pc.turnDone);
 
     // Undo button
-    if (this.undoSnapshot) {
+    if (this.undoSnapshot && !exploring) {
       const undoY = endY + btnGap + 4;
       this.undoBtn.setPosition(Math.round(panel.x + panel.w / 2), Math.round(undoY));
       this.undoBtn.resize(btnW, btnH, btnFontSize);
@@ -873,25 +1421,20 @@ export class CombatScene extends Phaser.Scene {
       this.undoBtn.setVisible(false);
     }
 
-    // Top-right buttons: [INVENTORY] [O]
-    const s = this.coords.scale;
-    const oBtnSize = Math.round(s * 1.6);
-    const oBtnX = Math.round(topBar.x + topBar.w - oBtnSize / 2 - 4);
-    const oBtnY = Math.round(topBar.h / 2);
-    this.optionsBtn.setPosition(oBtnX, oBtnY);
-    this.optionsBtn.resize(oBtnSize, oBtnSize, this.coords.fontSize(0.025));
-
-    const invBtnW = Math.round(oBtnSize * 5);
-    const invBtnX = Math.round(oBtnX - oBtnSize / 2 - invBtnW / 2 - 4);
-    this.inventoryBtn.setPosition(invBtnX, oBtnY);
-    this.inventoryBtn.resize(invBtnW, oBtnSize, this.coords.fontSize(0.02));
-
-    this.drawLog();
+    // Leave button. Explore-only, and only in a dungeon — B's call that the
+    // party can walk out from anywhere, at the cost of the nest repopulating.
+    if (this.leaveBtn) {
+      this.leaveBtn.setVisible(exploring);
+      if (exploring) {
+        this.leaveBtn.setPosition(Math.round(panel.x + panel.w / 2), Math.round(btnStartY));
+        this.leaveBtn.resize(btnW, btnH, btnFontSize);
+      }
+    }
   }
 
   private drawLog(): void {
     const panel = this.coords.regionPixels(LAYOUT.sidePanel);
-    const btnH = Math.max(22, panel.h * 0.032);
+    const btnH = this.actionButtonHeight();
     const logTop = panel.y + panel.h * 0.45 + btnH * 0.7;
     const logH = panel.h * 0.53;
     const fontSize = this.coords.fontSize(0.013);
@@ -956,12 +1499,12 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private openOptions(): void {
-    this.scene.launch('OptionsScene', { returnTo: 'CombatScene', overlay: true });
+    this.scene.launch('OptionsScene', { returnTo: this.scene.key, overlay: true });
     this.scene.pause();
   }
 
   private openInventory(): void {
-    this.scene.launch('InventoryScene', { returnTo: 'CombatScene', overlay: true, party: this.party });
+    this.scene.launch('InventoryScene', { returnTo: this.scene.key, overlay: true, party: this.party });
     this.scene.pause();
   }
 
@@ -973,30 +1516,164 @@ export class CombatScene extends Phaser.Scene {
     return 0;
   }
 
+  /** Single victory path — reached from every kill that empties the field. */
+  private onVictory(): void {
+    // A pack still sealed in the wall can't just be left there — the party
+    // would win the dungeon with six goblins un-fought behind a rock face.
+    // Spring it now instead of resolving, and the fight carries on.
+    if (this.dungeon?.ambush && !this.ambushSprung
+        && this.groups.find(g => g.id === this.dungeon!.ambush!.triggerGroup)?.activated) {
+      this.springAmbush();
+      this.turns.beginPlayerTurn();
+      return;
+    }
+
+    // In a dungeon, an empty field means this engagement ended, not the level.
+    // Only the last pack is a real victory.
+    if (this.dungeon && this.hasDormantGroups()) {
+      this.endEngagement();
+      return;
+    }
+
+    if (this.encounterId) WorldState.markComplete(this.encounterId);
+
+    // XP is awarded once, here, on the single victory path — so it can't be
+    // double-granted by the several kill sites that can empty the field.
+    this.xpAwarded = encounterXp(this.enemyCountAtStart);
+    this.levelUps = awardXp(this.party, this.xpAwarded);
+    this.logMsg(`+${this.xpAwarded} XP`, undefined);
+    for (const up of this.levelUps) {
+      this.logMsg(`${up.pc.name} reaches level ${up.to}! ${up.gains.join(', ')}`, undefined);
+    }
+
+    const dur = this.logMsg('★ VICTORY ★', 'victory');
+    this.mode = 'select';
+    this.activeAction = null;
+    this.redraw();
+    this.time.delayedCall(Math.max(dur, 500), () => this.showVictoryOverlay());
+  }
+
   private showDefeatOverlay(): void {
-    const w = this.coords.canvasWidth;
-    const h = this.coords.canvasHeight;
+    this.showEndOverlay('DEFEATED', '#aa2222', 'ACCEPT DEATH', () => {
+      this.scene.start('MenuScene');
+    });
+  }
 
-    const overlay = this.add.graphics().setDepth(50);
-    overlay.fillStyle(0x000000, 0.85);
-    overlay.fillRect(0, 0, w, h);
+  private showVictoryOverlay(): void {
+    // In a dungeon the headline is the whole run, not just the last room —
+    // earlier engagements already paid out one at a time as they cleared.
+    const total = this.dungeon ? this.dungeonXp + this.xpAwarded : this.xpAwarded;
+    const lines = [`+${total} XP`];
+    for (const up of this.levelUps) {
+      lines.push(`${up.pc.name} reached level ${up.to} — ${up.gains.join(', ')}`);
+    }
+    this.showEndOverlay('★ VICTORY ★', '#ddcc44', 'BACK 2 WORLD', () => this.leaveCombat(),
+      lines.join('\n'));
+  }
 
-    this.add.text(w / 2, h * 0.35, 'DEFEATED', {
-      fontSize: `${this.coords.fontSize(0.08)}px`,
-      color: '#aa2222',
+  /** Cheat: wipe the field and take the normal victory path, XP and all. */
+  private cheatSkip(): void {
+    // loadLevel is async; without this an impatient click lands before
+    // finishSetup has built TurnSystem and throws on this.turns.
+    if (!this.ready) return;
+    if (this.turns.phase === 'victory' || this.turns.phase === 'defeat') return;
+    // Nothing to skip while exploring — there's no engagement yet. Without this
+    // the cheat "wins" an empty field and pays a full encounter's XP for it,
+    // over and over, without ever waking a pack.
+    if (this.turns.phase === 'explore') return;
+    for (const e of this.enemies) { e.hp = 0; e.dead = true; }
+    // MUST empty in place. TurnSystem holds a reference to this exact array and
+    // its checkVictory() is `enemies.length === 0`; reassigning would leave it
+    // pointing at the old full array and victory would never fire again. This
+    // is currently masked by calling onVictory() directly, but a dungeon runs
+    // several engagements through one TurnSystem and would break on the second.
+    this.enemies.length = 0;
+    this.logMsg('— skipped —', undefined);
+    this.redraw();
+    this.onVictory();
+  }
+
+  /**
+   * Hand the party back to wherever this encounter came from. Defaults to the
+   * world map tile that triggered it; `returnTo` can override the destination.
+   */
+  private leaveCombat(): void {
+    const dest = this.returnTo;
+    if (dest.scene === 'WorldMapScene') {
+      if (dest.mapFile) WorldState.mapFile = dest.mapFile;
+      if (dest.tile) WorldState.partyTile = { x: dest.tile.x, y: dest.tile.y };
+      this.scene.start('WorldMapScene', { party: this.party, mapFile: WorldState.mapFile });
+    } else {
+      this.scene.start(dest.scene, { party: this.party });
+    }
+  }
+
+  /** Victory and defeat differ only in wording and colour. */
+  private showEndOverlay(
+    title: string,
+    titleColor: string,
+    buttonText: string,
+    onClick: () => void,
+    subtitle = '',
+  ): void {
+    this.endGfx = this.add.graphics().setDepth(50);
+
+    this.endText = this.add.text(0, 0, title, {
+      color: titleColor,
       fontStyle: 'bold',
       fontFamily: 'monospace',
     }).setOrigin(0.5).setDepth(51);
 
-    const btnW = Math.max(200, w * 0.2);
-    const btnH = Math.max(40, h * 0.06);
-    const btn = new UIButton(this, w / 2, h * 0.55, {
-      text: 'ACCEPT DEATH', width: btnW, height: btnH, fontSize: this.coords.fontSize(0.025),
+    this.endSubText = this.add.text(0, 0, subtitle, {
+      color: '#cfd6e6', fontFamily: 'monospace', align: 'center',
+    }).setOrigin(0.5, 0).setDepth(51).setVisible(subtitle !== '');
+
+    this.endBtn = new UIButton(this, 0, 0, {
+      text: buttonText,
       bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
       borderColor: 0x662222, borderHoverColor: 0xaa4444,
       textColor: '#cc6644', textHoverColor: '#ffaa66',
-      onClick: () => this.scene.start('MenuScene'),
+      onClick,
     });
-    btn.setDepth(51);
+    this.endBtn.setDepth(51);
+
+    this.layoutEndOverlay();
+  }
+
+  /** Separate from creation so the overlay survives a resize. */
+  private layoutEndOverlay(): void {
+    if (!this.endGfx || !this.endText || !this.endBtn) return;
+
+    const w = this.coords.canvasWidth;
+    const h = this.coords.canvasHeight;
+
+    this.endGfx.clear();
+    this.endGfx.fillStyle(0x000000, 0.85);
+    this.endGfx.fillRect(0, 0, w, h);
+
+    this.endText
+      .setPosition(Math.round(w / 2), Math.round(h * 0.33))
+      .setFontSize(this.coords.fontSize(0.08));
+
+    // The button sits BELOW the subtitle rather than at a fixed fraction — a
+    // full party levelling produces five lines and a fixed position buries the
+    // last one under the button.
+    let btnY = Math.round(h * 0.58);
+    if (this.endSubText) {
+      const subTop = Math.round(h * 0.44);
+      this.endSubText
+        .setPosition(Math.round(w / 2), subTop)
+        .setFontSize(this.coords.fontSize(0.024));
+      if (this.endSubText.text) {
+        btnY = Math.round(subTop + this.endSubText.height + h * 0.06);
+      }
+    }
+
+    this.endBtn.setPosition(Math.round(w / 2), btnY);
+    this.endBtn.resize(
+      Math.max(200, w * 0.2),
+      Math.max(40, h * 0.06),
+      this.coords.fontSize(0.025),
+    );
   }
 }

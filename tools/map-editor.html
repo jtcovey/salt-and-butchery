@@ -29,6 +29,15 @@
   }
   .tb-btn:hover { background: #2a3a5a; border-color: #668; color: #ddeeff; }
 
+  .mode-btn.active {
+    background: #3a2a1a; border-color: #aa8844; color: #ffcc77;
+  }
+  .tb-sep { width: 1px; height: 22px; background: #445; margin: 0 4px; }
+  #toolbar input.num-in {
+    width: 52px; background: #0f1a2e; border: 1px solid #445; color: #eee;
+    padding: 4px 6px; font-family: monospace; font-size: 13px;
+  }
+
   /* Main area */
   #main {
     display: flex; flex: 1; overflow: hidden;
@@ -74,6 +83,24 @@
     width: 16px; height: 16px; border: 1px solid #555; border-radius: 2px; flex-shrink: 0;
   }
 
+  /* Location detail fields */
+  .field-group { margin-bottom: 6px; }
+  .field-group label {
+    display: block; font-size: 10px; color: #666;
+    text-transform: uppercase; margin-bottom: 2px;
+  }
+  .field-group input, .field-group select {
+    width: 100%; background: #0f1a2e; border: 1px solid #445; color: #eee;
+    padding: 4px 6px; font-family: monospace; font-size: 12px;
+  }
+  .field-hint { font-size: 10px; color: #556; line-height: 1.4; margin-top: 6px; }
+  .derived-id {
+    background: #0d1420; border: 1px solid #334; color: #77aa88;
+    padding: 4px 6px; font-family: monospace; font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .derived-id.empty { color: #a55; }
+
   /* Status bar */
   #statusbar {
     display: flex; justify-content: space-between; align-items: center;
@@ -85,6 +112,17 @@
 <body>
 
 <div id="toolbar">
+  <label>Mode:</label>
+  <button class="tb-btn mode-btn active" data-mode="encounter">Encounter</button>
+  <button class="tb-btn mode-btn" data-mode="worldmap">World Map</button>
+  <button class="tb-btn mode-btn" data-mode="town">Town</button>
+  <div class="tb-sep"></div>
+  <label>Size:</label>
+  <input type="number" id="grid-cols" min="8" max="120" step="1" value="60" class="num-in" />
+  <span style="color:#556">x</span>
+  <input type="number" id="grid-rows" min="8" max="120" step="1" value="40" class="num-in" />
+  <button class="tb-btn" id="btn-resize">Apply</button>
+  <div class="tb-sep"></div>
   <label>Map:</label>
   <input type="text" id="map-name" value="Untitled" />
   <button class="tb-btn" id="btn-new">New</button>
@@ -100,15 +138,27 @@
   <div id="sidebar">
     <div class="layer-tabs">
       <button class="layer-tab active" data-layer="terrain">Terrain</button>
-      <button class="layer-tab" data-layer="characters">Chars</button>
+      <button class="layer-tab" data-layer="markers" id="tab-markers">Chars</button>
     </div>
     <div id="palette-terrain" class="palette-section">
       <div class="palette-label">Tiles</div>
       <button class="tool-btn active" data-tool="grass">
         <span class="tool-swatch" style="background:#2a5a2a"></span> Grass (G)
       </button>
+      <button class="tool-btn" data-tool="forest">
+        <span class="tool-swatch" style="background:#14301a"></span> Forest (F)
+      </button>
       <button class="tool-btn" data-tool="rock">
         <span class="tool-swatch" style="background:#4a4a4a"></span> Rock (R)
+      </button>
+      <button class="tool-btn" data-tool="road">
+        <span class="tool-swatch" style="background:#6e6a5e"></span> Road (O)
+      </button>
+      <button class="tool-btn" data-tool="destroyed">
+        <span class="tool-swatch" style="background:#9c8b6b"></span> Destroyed (B)
+      </button>
+      <button class="tool-btn" data-tool="goblin_tracks">
+        <span class="tool-swatch" style="background:#5a4732"></span> Gob Tracks (T)
       </button>
       <button class="tool-btn" data-tool="eraser">
         <span class="tool-swatch" style="background:#1a1a2e; border-style:dashed"></span> Clear (X)
@@ -145,22 +195,89 @@
         <span class="tool-swatch" style="background:#1a1a2e; border-style:dashed"></span> Clear (X)
       </button>
     </div>
+    <div id="palette-locations" class="palette-section" style="display:none">
+      <div class="palette-label">Party</div>
+      <button class="tool-btn" data-tool="party_start">
+        <span class="tool-swatch" style="background:#66ddff"></span> Party Start (P)
+      </button>
+      <div class="palette-label" style="margin-top:8px">Places</div>
+      <button class="tool-btn" data-tool="location">
+        <span class="tool-swatch" style="background:#ddaa44"></span> Location (L)
+      </button>
+      <div class="field-group">
+        <label for="loc-label">Label</label>
+        <input type="text" id="loc-label" value="Town" />
+      </div>
+      <div class="field-group">
+        <label>ID &mdash; auto from label</label>
+        <div id="loc-id-preview" class="derived-id">town</div>
+      </div>
+      <div class="field-group">
+        <label for="loc-kind">Kind</label>
+        <!-- Options are rebuilt per mode by refreshKindOptions(). -->
+        <select id="loc-kind"></select>
+      </div>
+      <div class="field-hint">
+        Click a tile to place. Click a placed marker to remove it.
+        Re-using a label moves that location instead of duplicating it.
+      </div>
+      <button class="tool-btn" data-tool="eraser" style="margin-top:8px">
+        <span class="tool-swatch" style="background:#1a1a2e; border-style:dashed"></span> Clear (X)
+      </button>
+    </div>
   </div>
 </div>
 
 <div id="statusbar">
   <span id="status-text">Ready</span>
-  <span>Grid: 60 x 40</span>
+  <span id="grid-dims">Grid: 60 x 40</span>
 </div>
 
 <script>
-const COLS = 60;
-const ROWS = 40;
+// Grid dimensions are per-map now. The game letterbox-fits whatever it's given,
+// so a small town map renders at a larger tile size for free — that's the zoom.
+let COLS = 60;
+let ROWS = 40;
+
+const DEFAULT_SIZE = { encounter: [60, 40], worldmap: [60, 40], town: [24, 18] };
+
+// Tile ids are the contract with the game — 0 and 1 must not change,
+// existing level files and the renderer depend on them.
 const TILE_GRASS = 0;
 const TILE_ROCK = 1;
+const TILE_FOREST = 2;
+const TILE_ROAD = 3;
+const TILE_DESTROYED = 4;
+const TILE_TRACKS = 5;
 
-const TILE_COLORS = { 0: '#2a5a2a', 1: '#4a4a4a' };
-const TILE_NAMES = { 0: 'Grass', 1: 'Rock' };
+const TILE_COLORS = {
+  0: '#2a5a2a',  // grass
+  1: '#4a4a4a',  // rock
+  2: '#14301a',  // forest
+  3: '#6e6a5e',  // road
+  4: '#9c8b6b',  // destroyed
+  5: '#5a4732',  // goblin tracks
+};
+const TILE_NAMES = {
+  0: 'Grass', 1: 'Rock', 2: 'Forest',
+  3: 'Road', 4: 'Destroyed', 5: 'Goblin Tracks',
+};
+
+// Palette tool name -> tile id
+const TERRAIN_TOOLS = {
+  grass: TILE_GRASS,
+  forest: TILE_FOREST,
+  rock: TILE_ROCK,
+  road: TILE_ROAD,
+  destroyed: TILE_DESTROYED,
+  goblin_tracks: TILE_TRACKS,
+};
+
+// Keyboard shortcut -> terrain tool
+const TERRAIN_KEYS = {
+  g: 'grass', f: 'forest', r: 'rock',
+  o: 'road', b: 'destroyed', t: 'goblin_tracks',
+};
 
 const CHAR_COLORS = {
   hero_1: '#4488ff', hero_2: '#44cc44', hero_3: '#aa44cc',
@@ -185,9 +302,39 @@ const DEFAULT_HEROES = [
   { type: 'hero_4', col: 8, row: 30 },
 ];
 
+/**
+ * Marker kinds per map mode. World maps place travel destinations; towns place
+ * NPCs. Same tool, same data shape — only the vocabulary differs.
+ */
+const MARKER_KINDS = {
+  worldmap: ['town', 'encounter', 'dungeon', 'shop', 'rest'],
+  town: ['vendor', 'inn', 'quest', 'dialog', 'exit'],
+};
+
+// World map location kinds — colour + single-char glyph drawn on the marker
+const LOC_COLORS = {
+  town: '#ddaa44', encounter: '#cc4444', dungeon: '#8844cc',
+  shop: '#44aa66', rest: '#4488cc',
+  vendor: '#44aa66', inn: '#4488cc', quest: '#ddcc44',
+  dialog: '#88aacc', exit: '#cc6644',
+};
+const LOC_GLYPHS = {
+  town: 'T', encounter: '!', dungeon: 'D', shop: '$', rest: 'R',
+  vendor: '$', inn: 'Z', quest: '!', dialog: '?', exit: '>',
+};
+const PARTY_COLOR = '#66ddff';
+
+/** World map and town both place identified point markers; encounter places units. */
+function isMarkerMode() {
+  return currentMode === 'worldmap' || currentMode === 'town';
+}
+
 // State
 let terrainGrid = [];
-let characters = [];
+let characters = [];      // encounter mode: heroes + enemies
+let locations = [];       // worldmap mode: { id, label, kind, col, row }
+let partyStart = null;    // worldmap mode: { col, row }
+let currentMode = 'encounter';
 let currentLayer = 'terrain';
 let currentTool = 'grass';
 let mouseDown = false;
@@ -203,7 +350,11 @@ function initGrid() {
   for (let r = 0; r < ROWS; r++) {
     terrainGrid.push(new Array(COLS).fill(TILE_GRASS));
   }
-  characters = DEFAULT_HEROES.map(h => ({ ...h }));
+  characters = currentMode === 'encounter' ? DEFAULT_HEROES.map(h => ({ ...h })) : [];
+  locations = [];
+  partyStart = isMarkerMode()
+    ? { col: Math.floor(COLS / 2), row: Math.floor(ROWS / 2) }
+    : null;
   document.getElementById('map-name').value = 'Untitled';
 }
 
@@ -244,24 +395,38 @@ function render() {
     ctx.stroke();
   }
 
-  // Characters
-  const charRadius = tilePx * 0.38;
-  for (const ch of characters) {
-    const cx = (ch.col + 0.5) * tilePx;
-    const cy = (ch.row + 0.5) * tilePx;
-    ctx.fillStyle = CHAR_COLORS[ch.type] || '#fff';
-    ctx.beginPath();
-    ctx.arc(cx, cy, charRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(8, tilePx * 0.5)}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(CHAR_LABELS[ch.type] || '?', cx, cy);
+  // Markers
+  if (currentMode === 'encounter') {
+    const charRadius = tilePx * 0.38;
+    for (const ch of characters) {
+      drawMarker(
+        (ch.col + 0.5) * tilePx, (ch.row + 0.5) * tilePx, charRadius,
+        CHAR_COLORS[ch.type] || '#fff', CHAR_LABELS[ch.type] || '?'
+      );
+    }
+  } else {
+    const locRadius = tilePx * 0.45;
+    for (const loc of locations) {
+      const cx = (loc.col + 0.5) * tilePx;
+      const cy = (loc.row + 0.5) * tilePx;
+      drawMarker(cx, cy, locRadius, LOC_COLORS[loc.kind] || '#ddaa44', LOC_GLYPHS[loc.kind] || '?');
+      if (tilePx >= 10 && loc.label) {
+        ctx.fillStyle = '#eee';
+        ctx.font = `${Math.max(8, tilePx * 0.42)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.strokeText(loc.label, cx, cy + locRadius + 2);
+        ctx.fillText(loc.label, cx, cy + locRadius + 2);
+      }
+    }
+    if (partyStart) {
+      drawMarker(
+        (partyStart.col + 0.5) * tilePx, (partyStart.row + 0.5) * tilePx,
+        tilePx * 0.4, PARTY_COLOR, 'P'
+      );
+    }
   }
 
   // Hover highlight
@@ -274,6 +439,22 @@ function render() {
     ctx.lineWidth = 1;
     ctx.strokeRect(hoverCol * tilePx + 0.5, hoverRow * tilePx + 0.5, tilePx - 1, tilePx - 1);
   }
+}
+
+function drawMarker(cx, cy, radius, fill, glyph) {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.max(8, tilePx * 0.5)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(glyph, cx, cy);
 }
 
 function getTileFromMouse(e) {
@@ -292,22 +473,27 @@ function applyTool(col, row) {
       terrainGrid[row][col] = TILE_GRASS;
       changed = true;
     }
-    const charIdx = characters.findIndex(c => c.col === col && c.row === row);
-    if (charIdx >= 0) {
-      characters.splice(charIdx, 1);
-      changed = true;
+    if (currentMode === 'encounter') {
+      const charIdx = characters.findIndex(c => c.col === col && c.row === row);
+      if (charIdx >= 0) { characters.splice(charIdx, 1); changed = true; }
+    } else {
+      const locIdx = locations.findIndex(l => l.col === col && l.row === row);
+      if (locIdx >= 0) { locations.splice(locIdx, 1); changed = true; }
+      if (partyStart && partyStart.col === col && partyStart.row === row) {
+        partyStart = null; changed = true;
+      }
     }
     if (changed) render();
     return;
   }
 
   if (currentLayer === 'terrain') {
-    const tileId = currentTool === 'rock' ? TILE_ROCK : TILE_GRASS;
+    const tileId = TERRAIN_TOOLS[currentTool] ?? TILE_GRASS;
     if (terrainGrid[row][col] !== tileId) {
       terrainGrid[row][col] = tileId;
       render();
     }
-  } else {
+  } else if (currentMode === 'encounter') {
     const existing = characters.findIndex(c => c.col === col && c.row === row);
     const isHero = currentTool.startsWith('hero_');
 
@@ -322,19 +508,88 @@ function applyTool(col, row) {
       characters.push({ type: currentTool, col, row });
     }
     render();
+  } else {
+    applyLocationTool(col, row);
   }
 }
 
+function applyLocationTool(col, row) {
+  if (currentTool === 'party_start') {
+    if (partyStart && partyStart.col === col && partyStart.row === row) {
+      partyStart = null;
+    } else {
+      partyStart = { col, row };
+    }
+    render();
+    return;
+  }
+
+  if (currentTool !== 'location') return;
+
+  // Clicking an existing marker removes it
+  const hereIdx = locations.findIndex(l => l.col === col && l.row === row);
+  if (hereIdx >= 0) {
+    const removed = locations.splice(hereIdx, 1)[0];
+    render();
+    setStatus(`Removed "${removed.label}"`);
+    return;
+  }
+
+  const label = document.getElementById('loc-label').value.trim();
+  const kind = document.getElementById('loc-kind').value;
+  const id = slugify(label);
+
+  if (!id) {
+    setStatus('Location needs a label before placing.');
+    return;
+  }
+
+  // Same label (and therefore same id) placed elsewhere: move it, don't duplicate
+  const dupIdx = locations.findIndex(l => l.id === id);
+  const moved = dupIdx >= 0;
+  if (moved) locations.splice(dupIdx, 1);
+
+  locations.push({ id, label, kind, col, row });
+  render();
+  setStatus(moved
+    ? `Moved "${label}" (${id}) to (${col}, ${row})`
+    : `Placed "${label}" (${id}, ${kind}) at (${col}, ${row})`);
+}
+
+function refreshDerivedId() {
+  const label = document.getElementById('loc-label').value.trim();
+  const id = slugify(label);
+  const el = document.getElementById('loc-id-preview');
+  el.textContent = id || '(needs a label)';
+  el.classList.toggle('empty', !id);
+}
+
+function setStatus(text) {
+  document.getElementById('status-text').textContent = text;
+}
+
 function updateStatus(col, row) {
-  const el = document.getElementById('status-text');
+  const modeTag = currentMode === 'worldmap' ? '[World Map] '
+    : currentMode === 'town' ? '[Town] '
+    : '[Encounter] ';
   if (col < 0 || col >= COLS || row < 0 || row >= ROWS) {
-    el.textContent = 'Ready';
+    setStatus(modeTag + 'Ready');
     return;
   }
   const tileName = TILE_NAMES[terrainGrid[row][col]] || 'Unknown';
-  const charHere = characters.find(c => c.col === col && c.row === row);
-  const charInfo = charHere ? ` | ${CHAR_NAMES[charHere.type] || charHere.type}` : '';
-  el.textContent = `Tile (${col}, ${row}) - ${tileName}${charInfo}`;
+
+  let markerInfo = '';
+  if (currentMode === 'encounter') {
+    const charHere = characters.find(c => c.col === col && c.row === row);
+    if (charHere) markerInfo = ` | ${CHAR_NAMES[charHere.type] || charHere.type}`;
+  } else {
+    const locHere = locations.find(l => l.col === col && l.row === row);
+    if (locHere) markerInfo = ` | ${locHere.label} (${locHere.id}, ${locHere.kind})`;
+    else if (partyStart && partyStart.col === col && partyStart.row === row) {
+      markerInfo = ' | Party Start';
+    }
+  }
+  setStatus(`${modeTag}Tile (${col}, ${row}) - ${tileName}${markerInfo}`);
 }
 
 // Canvas input
@@ -373,32 +628,143 @@ canvas.addEventListener('contextmenu', (e) => {
   if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
     if (currentLayer === 'terrain') {
       terrainGrid[row][col] = TILE_GRASS;
-    } else {
+    } else if (currentMode === 'encounter') {
       const idx = characters.findIndex(c => c.col === col && c.row === row);
       if (idx >= 0) characters.splice(idx, 1);
+    } else {
+      const idx = locations.findIndex(l => l.col === col && l.row === row);
+      if (idx >= 0) locations.splice(idx, 1);
+      else if (partyStart && partyStart.col === col && partyStart.row === row) partyStart = null;
     }
     render();
   }
 });
 
+// Palette / tab visibility — single source of truth for mode + layer
+function refreshPalettes() {
+  const onTerrain = currentLayer === 'terrain';
+  document.getElementById('palette-terrain').style.display = onTerrain ? 'block' : 'none';
+  document.getElementById('palette-characters').style.display =
+    (!onTerrain && currentMode === 'encounter') ? 'block' : 'none';
+  document.getElementById('palette-locations').style.display =
+    (!onTerrain && isMarkerMode()) ? 'block' : 'none';
+
+  document.querySelectorAll('.layer-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.layer === currentLayer);
+  });
+  document.getElementById('tab-markers').textContent =
+    currentMode === 'worldmap' ? 'Places' : currentMode === 'town' ? 'NPCs' : 'Chars';
+
+  refreshKindOptions();
+  updateToolHighlight();
+}
+
+/** The Kind dropdown carries a different vocabulary per map mode. */
+function refreshKindOptions() {
+  const sel = document.getElementById('loc-kind');
+  const kinds = MARKER_KINDS[currentMode];
+  if (!kinds) return;
+  if (sel.dataset.mode === currentMode) return;
+
+  const previous = sel.value;
+  sel.innerHTML = '';
+  for (const k of kinds) {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = k;
+    sel.appendChild(opt);
+  }
+  sel.dataset.mode = currentMode;
+  sel.value = kinds.includes(previous) ? previous : kinds[0];
+}
+
+function defaultMarkerTool() {
+  return currentMode === 'encounter' ? 'hero_1' : 'location';
+}
+
+function setMode(mode) {
+  if (mode === currentMode) return;
+  const previous = currentMode;
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+
+  // Switching into a mode with a different default size, on an untouched map,
+  // resizes to that default. Towns want to be small — that's what makes them
+  // render zoomed in.
+  const [dc, dr] = DEFAULT_SIZE[mode];
+  const [pc, pr] = DEFAULT_SIZE[previous];
+  const untouched = locations.length === 0 && COLS === pc && ROWS === pr;
+  if (untouched && (dc !== COLS || dr !== ROWS)) {
+    applyGridSize(dc, dr);
+  }
+
+  if (isMarkerMode() && !partyStart && locations.length === 0) {
+    partyStart = { col: Math.floor(COLS / 2), row: Math.floor(ROWS / 2) };
+  }
+  if (currentLayer !== 'terrain') currentTool = defaultMarkerTool();
+  refreshPalettes();
+  syncSizeInputs();
+  updateStatus(hoverCol, hoverRow);
+  resizeCanvas();
+}
+
+function syncSizeInputs() {
+  document.getElementById('grid-cols').value = COLS;
+  document.getElementById('grid-rows').value = ROWS;
+}
+
+/** Resize the grid, keeping whatever tiles and markers still fit. */
+function applyGridSize(cols, rows) {
+  cols = Math.max(8, Math.min(120, cols | 0));
+  rows = Math.max(8, Math.min(120, rows | 0));
+  if (cols === COLS && rows === ROWS) return;
+
+  const old = terrainGrid;
+  const next = [];
+  for (let r = 0; r < rows; r++) {
+    const row = new Array(cols).fill(TILE_GRASS);
+    if (old[r]) {
+      for (let c = 0; c < Math.min(cols, old[r].length); c++) row[c] = old[r][c];
+    }
+    next.push(row);
+  }
+
+  COLS = cols;
+  ROWS = rows;
+  terrainGrid = next;
+
+  // Drop anything now outside the grid.
+  const inside = (o) => o.col < COLS && o.row < ROWS;
+  characters = characters.filter(inside);
+  locations = locations.filter(inside);
+  if (partyStart && !inside(partyStart)) partyStart = null;
+
+  syncSizeInputs();
+  document.getElementById('grid-dims').textContent = `Grid: ${COLS} x ${ROWS}`;
+}
+
+document.getElementById('btn-resize').addEventListener('click', () => {
+  applyGridSize(
+    parseInt(document.getElementById('grid-cols').value, 10),
+    parseInt(document.getElementById('grid-rows').value, 10),
+  );
+  resizeCanvas();
+  updateStatus(-1, -1);
+});
+
+// Mode buttons
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode));
+});
+
 // Layer tabs
 document.querySelectorAll('.layer-tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.layer-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
     currentLayer = tab.dataset.layer;
-
-    document.getElementById('palette-terrain').style.display =
-      currentLayer === 'terrain' ? 'block' : 'none';
-    document.getElementById('palette-characters').style.display =
-      currentLayer === 'characters' ? 'block' : 'none';
-
-    if (currentLayer === 'terrain') {
-      currentTool = 'grass';
-    } else {
-      currentTool = 'hero_1';
-    }
-    updateToolHighlight();
+    currentTool = currentLayer === 'terrain' ? 'grass' : defaultMarkerTool();
+    refreshPalettes();
   });
 });
 
@@ -416,41 +782,32 @@ function updateToolHighlight() {
   });
 }
 
+// Live-derive the location id from the label so the two can never drift apart
+document.getElementById('loc-label').addEventListener('input', refreshDerivedId);
+
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const key = e.key.toLowerCase();
 
-  if (key === 'g') { currentLayer = 'terrain'; currentTool = 'grass'; }
-  else if (key === 'r') { currentLayer = 'terrain'; currentTool = 'rock'; }
-  else if (key === 'm') { switchToChars(); currentTool = 'skeleton_melee'; }
-  else if (key === 'a') { switchToChars(); currentTool = 'skeleton_archer'; }
-  else if (key >= '1' && key <= '6') { switchToChars(); currentTool = 'hero_' + key; }
+  if (TERRAIN_KEYS[key]) { currentLayer = 'terrain'; currentTool = TERRAIN_KEYS[key]; }
   else if (key === 'x') { currentTool = 'eraser'; }
-  else return;
-
-  if (currentLayer === 'terrain') {
-    document.querySelectorAll('.layer-tab').forEach(t => {
-      t.classList.toggle('active', t.dataset.layer === 'terrain');
-    });
-    document.getElementById('palette-terrain').style.display = 'block';
-    document.getElementById('palette-characters').style.display = 'none';
+  else if (currentMode === 'encounter') {
+    if (key === 'm') { currentLayer = 'markers'; currentTool = 'skeleton_melee'; }
+    else if (key === 'a') { currentLayer = 'markers'; currentTool = 'skeleton_archer'; }
+    else if (key >= '1' && key <= '6') { currentLayer = 'markers'; currentTool = 'hero_' + key; }
+    else return;
+  } else {
+    if (key === 'p') { currentLayer = 'markers'; currentTool = 'party_start'; }
+    else if (key === 'l') { currentLayer = 'markers'; currentTool = 'location'; }
+    else return;
   }
-  updateToolHighlight();
+
+  refreshPalettes();
 });
 
-function switchToChars() {
-  currentLayer = 'characters';
-  document.querySelectorAll('.layer-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.layer === 'characters');
-  });
-  document.getElementById('palette-terrain').style.display = 'none';
-  document.getElementById('palette-characters').style.display = 'block';
-}
-
 // Save
-document.getElementById('btn-save').addEventListener('click', () => {
-  const mapName = document.getElementById('map-name').value.trim() || 'Untitled';
+function buildEncounterData(mapName) {
   const partySpawn = [];
   const enemies = [];
   let enemyMeleeCount = 0;
@@ -472,9 +829,9 @@ document.getElementById('btn-save').addEventListener('click', () => {
 
   partySpawn.sort((a, b) => a.slot - b.slot);
 
-  const data = {
+  return {
     formatVersion: 1,
-    id: mapName.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+    id: slugify(mapName),
     name: mapName,
     arenaWidth: COLS,
     arenaHeight: ROWS,
@@ -484,6 +841,50 @@ document.getElementById('btn-save').addEventListener('click', () => {
     enemies,
     obstacles: [],
   };
+}
+
+/**
+ * World maps and towns share this shape entirely — terrain, a party start, and
+ * identified point markers. Only `kind` and the marker vocabulary differ, so the
+ * game can load both through one code path.
+ */
+function buildMarkerMapData(mapName) {
+  return {
+    formatVersion: 1,
+    kind: currentMode,
+    id: slugify(mapName),
+    name: mapName,
+    width: COLS,
+    height: ROWS,
+    tileSize: 1,
+    terrainGrid,
+    partyStart: partyStart
+      ? { x: partyStart.col + 0.5, y: partyStart.row + 0.5 }
+      : null,
+    locations: locations.map(l => ({
+      id: l.id,
+      label: l.label,
+      kind: l.kind,
+      x: l.col + 0.5,
+      y: l.row + 0.5,
+    })),
+  };
+}
+
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  const mapName = document.getElementById('map-name').value.trim() || 'Untitled';
+
+  if (isMarkerMode() && !partyStart) {
+    if (!confirm('No Party Start placed. Save anyway?')) return;
+  }
+
+  const data = isMarkerMode()
+    ? buildMarkerMapData(mapName)
+    : buildEncounterData(mapName);
 
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
@@ -493,6 +894,7 @@ document.getElementById('btn-save').addEventListener('click', () => {
   a.download = mapName.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json';
   a.click();
   URL.revokeObjectURL(url);
+  setStatus(`Saved ${currentMode} (${COLS}x${ROWS}): ${a.download}`);
 });
 
 // Load
@@ -511,36 +913,72 @@ document.getElementById('file-input').addEventListener('change', (e) => {
         alert('Invalid map file: missing terrainGrid');
         return;
       }
-      if (data.terrainGrid.length !== ROWS || data.terrainGrid[0].length !== COLS) {
-        alert(`Grid size mismatch: expected ${COLS}x${ROWS}, got ${data.terrainGrid[0]?.length}x${data.terrainGrid.length}`);
+      // Adopt whatever size the file is rather than rejecting it.
+      ROWS = data.terrainGrid.length;
+      COLS = data.terrainGrid[0]?.length ?? 0;
+      if (!COLS || !ROWS) {
+        alert('Invalid map file: empty terrainGrid');
         return;
       }
 
       terrainGrid = data.terrainGrid.map(row => [...row]);
       characters = [];
+      locations = [];
+      partyStart = null;
 
-      if (data.partySpawn) {
-        data.partySpawn.forEach((spawn, i) => {
-          characters.push({
-            type: 'hero_' + (i + 1),
-            col: Math.floor(spawn.x),
-            row: Math.floor(spawn.y),
+      const markerMap = data.kind === 'worldmap' || data.kind === 'town'
+        || Array.isArray(data.locations);
+
+      if (markerMap) {
+        if (data.partyStart) {
+          partyStart = {
+            col: Math.floor(data.partyStart.x),
+            row: Math.floor(data.partyStart.y),
+          };
+        }
+        (data.locations || []).forEach(loc => {
+          locations.push({
+            id: loc.id,
+            label: loc.label || loc.id,
+            kind: loc.kind || 'town',
+            col: Math.floor(loc.x),
+            row: Math.floor(loc.y),
           });
         });
+      } else {
+        if (data.partySpawn) {
+          data.partySpawn.forEach((spawn, i) => {
+            characters.push({
+              type: 'hero_' + (i + 1),
+              col: Math.floor(spawn.x),
+              row: Math.floor(spawn.y),
+            });
+          });
+        }
+        if (data.enemies) {
+          data.enemies.forEach(en => {
+            characters.push({
+              type: en.type || 'skeleton_melee',
+              col: Math.floor(en.x),
+              row: Math.floor(en.y),
+            });
+          });
+        }
       }
 
-      if (data.enemies) {
-        data.enemies.forEach(en => {
-          characters.push({
-            type: en.type || 'skeleton_melee',
-            col: Math.floor(en.x),
-            row: Math.floor(en.y),
-          });
-        });
-      }
+      // Switch editor mode to match the file that was loaded
+      currentMode = markerMap ? (data.kind === 'town' ? 'town' : 'worldmap') : 'encounter';
+      document.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === currentMode);
+      });
+      if (currentLayer !== 'terrain') currentTool = defaultMarkerTool();
+      refreshPalettes();
+      syncSizeInputs();
+      document.getElementById('grid-dims').textContent = `Grid: ${COLS} x ${ROWS}`;
 
       document.getElementById('map-name').value = data.name || 'Untitled';
-      render();
+      resizeCanvas();
+      setStatus(`Loaded ${currentMode} (${COLS}x${ROWS}): ${data.name || 'Untitled'}`);
     } catch (err) {
       alert('Failed to load map: ' + err.message);
     }
@@ -552,14 +990,23 @@ document.getElementById('file-input').addEventListener('change', (e) => {
 // New
 document.getElementById('btn-new').addEventListener('click', () => {
   if (!confirm('Clear current map and start fresh?')) return;
+  const [dc, dr] = DEFAULT_SIZE[currentMode];
+  COLS = dc;
+  ROWS = dr;
   initGrid();
-  render();
+  syncSizeInputs();
+  document.getElementById('grid-dims').textContent = `Grid: ${COLS} x ${ROWS}`;
+  resizeCanvas();
 });
 
 // Init
 window.addEventListener('resize', resizeCanvas);
 initGrid();
+refreshPalettes();
+refreshDerivedId();
+syncSizeInputs();
 resizeCanvas();
+updateStatus(-1, -1);
 </script>
 </body>
 </html>

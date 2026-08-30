@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { CoordinateSystem } from '../core/CoordinateSystem';
-import { UIButton } from '../ui/UIButton';
+import { UIButton, BUTTON_BACK } from '../ui/UIButton';
 import { GameOptions } from '../config/GameOptions';
+import { BaseScene } from './BaseScene';
 
-export class OptionsScene extends Phaser.Scene {
+export class OptionsScene extends BaseScene {
   private coords!: CoordinateSystem;
   private titleText!: Phaser.GameObjects.Text;
   private toggleBtns: UIButton[] = [];
@@ -42,10 +43,11 @@ export class OptionsScene extends Phaser.Scene {
       fontSize: '28px', color: '#cc8844', fontStyle: 'bold', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    const toggles: Array<{ key: 'godMode' | 'autoEndTurn' | 'showGrid'; label: string }> = [
+    const toggles: Array<{ key: 'godMode' | 'autoEndTurn' | 'showGrid' | 'showCheatSkip'; label: string }> = [
       { key: 'godMode', label: 'GOD MODE' },
       { key: 'autoEndTurn', label: 'AUTO END TURN' },
       { key: 'showGrid', label: 'SHOW GRID' },
+      { key: 'showCheatSkip', label: 'SHOW CHEAT SKIP' },
     ];
 
     for (const toggle of toggles) {
@@ -66,6 +68,7 @@ export class OptionsScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.input.hitTestPointer(pointer).length > 0) return;
       if (this.isOnSlider(pointer.x, pointer.y)) {
         this.dragging = true;
         this.updateSliderFromPointer(pointer.x);
@@ -78,13 +81,11 @@ export class OptionsScene extends Phaser.Scene {
 
     this.backBtn = new UIButton(this, 0, 0, {
       text: 'BACK', width: 200, height: 42, fontSize: 16,
-      bgColor: 0x1a0a0a, hoverColor: 0x2a1414, pressedColor: 0x3a1e1e,
-      borderColor: 0x442222, borderHoverColor: 0x884444,
-      textColor: '#cc8844', textHoverColor: '#ffaa66',
+      ...BUTTON_BACK,
       onClick: () => this.closeOptions(),
     });
 
-    this.scale.on('resize', () => this.reflow());
+    this.watchReflow();
     this.reflow();
   }
 
@@ -144,11 +145,13 @@ export class OptionsScene extends Phaser.Scene {
     return `${name}: ${on ? 'ON' : 'OFF'}`;
   }
 
-  private reflow(): void {
+  protected override reflow(): void {
     const cx = this.coords.canvasWidth / 2;
     const cy = this.coords.canvasHeight / 2;
 
-    this.titleText.setPosition(cx, cy - this.coords.canvasHeight * 0.2)
+    // Absolute fraction of height, not relative to centre — keeps a real margin
+    // above the toggle stack instead of drifting into it as the list grows.
+    this.titleText.setPosition(cx, Math.round(this.coords.canvasHeight * 0.15))
       .setFontSize(this.coords.fontSize(0.05));
 
     const btnW = Math.max(240, this.coords.canvasWidth * 0.22);

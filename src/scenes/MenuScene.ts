@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import { CoordinateSystem } from '../core/CoordinateSystem';
 import { UIButton } from '../ui/UIButton';
+import { BaseScene } from './BaseScene';
 
-export class MenuScene extends Phaser.Scene {
+export class MenuScene extends BaseScene {
   private coords!: CoordinateSystem;
   private titleText!: Phaser.GameObjects.Text;
   private subtitleText!: Phaser.GameObjects.Text;
@@ -40,11 +41,11 @@ export class MenuScene extends Phaser.Scene {
       fontSize: '12px', color: '#ffffff', fontFamily: 'monospace',
     }).setOrigin(0, 1);
 
-    this.scale.on('resize', () => this.reflow());
+    this.watchReflow();
     this.reflow();
   }
 
-  private reflow(): void {
+  protected override reflow(): void {
     const cx = this.coords.canvasWidth / 2;
     const cy = this.coords.canvasHeight / 2;
 
